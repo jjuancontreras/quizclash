@@ -10,6 +10,8 @@ const REQUIRED_CHOICE_COUNT = 4;
 /**
  * The mobile layout budget is enforced here, not in CSS — the text is
  * model-generated, so the limit has to hold before it ever reaches a screen.
+ * Requires all four choices to be distinct (case-insensitively, trimmed) so that
+ * shuffleQuestionChoices can reliably recompute correctIndex from the answer text.
  */
 export function isQuestionWithinBudget(q: Question): boolean {
   if (q.question.trim().length === 0) return false;
@@ -17,7 +19,12 @@ export function isQuestionWithinBudget(q: Question): boolean {
   if (q.explanation.length > MAX_EXPLANATION_CHARS) return false;
   if (q.choices.length !== REQUIRED_CHOICE_COUNT) return false;
   if (q.correctIndex < 0 || q.correctIndex >= REQUIRED_CHOICE_COUNT) return false;
-  return q.choices.every((c) => c.trim().length > 0 && c.length <= MAX_CHOICE_CHARS);
+  if (!q.choices.every((c) => c.trim().length > 0 && c.length <= MAX_CHOICE_CHARS)) return false;
+
+  // Ensure all four choices are distinct (case-insensitive, trimmed)
+  const normalized = q.choices.map(c => c.toLowerCase().trim());
+  const uniqueChoices = new Set(normalized);
+  return uniqueChoices.size === REQUIRED_CHOICE_COUNT;
 }
 
 /**

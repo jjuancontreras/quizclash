@@ -43,6 +43,21 @@ describe('isQuestionWithinBudget', () => {
   test('rejects an empty question stem', () => {
     expect(isQuestionWithinBudget(makeQuestion({ question: '   ' }))).toBe(false);
   });
+
+  test('rejects a question with duplicate choice text', () => {
+    const choices = ['ATP', 'ATP', 'Ribosome', 'Golgi body'];
+    expect(isQuestionWithinBudget(makeQuestion({ choices }))).toBe(false);
+  });
+
+  test('rejects a question with choices differing only by case or whitespace', () => {
+    const choices = ['ATP', ' atp ', 'Ribosome', 'Golgi body'];
+    expect(isQuestionWithinBudget(makeQuestion({ choices }))).toBe(false);
+  });
+
+  test('accepts a question with four genuinely distinct choices', () => {
+    const choices = ['ATP', 'DNA', 'Ribosome', 'Golgi body'];
+    expect(isQuestionWithinBudget(makeQuestion({ choices }))).toBe(true);
+  });
 });
 
 describe('shuffleQuestionChoices', () => {
@@ -66,6 +81,22 @@ describe('shuffleQuestionChoices', () => {
     const before = JSON.stringify(original);
     shuffleQuestionChoices(original, () => 0.7);
     expect(JSON.stringify(original)).toBe(before);
+  });
+
+  test('actually shuffles choices — detects regressions to no-op', () => {
+    const original = makeQuestion();
+    const originalOrder = original.choices.join(',');
+    let shuffledAtLeastOnce = false;
+
+    for (let seed = 0; seed < 50; seed++) {
+      const shuffled = shuffleQuestionChoices(original, () => seed / 50);
+      if (shuffled.choices.join(',') !== originalOrder) {
+        shuffledAtLeastOnce = true;
+        break;
+      }
+    }
+
+    expect(shuffledAtLeastOnce).toBe(true);
   });
 });
 
