@@ -1,0 +1,21 @@
+# Superpowers SDD ledgers / scratch
+.superpowers/
+# private-journal-mcp per-project entries
+.private-journal/
+
+node_modules/
+dist/
+.env*
+!.env.example
+
+# Cloudflare / Wrangler
+.wrangler/
+.dev.vars
+
+# Vercel
+.vercel/
+
+# Test output
+coverage/
+playwright-report/
+test-results/
