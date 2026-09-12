@@ -11,6 +11,7 @@ import type {
   Answer,
   EngineEvent,
   EngineResult,
+  GamePhase,
   GameState,
   Player,
   PublicState,
@@ -146,14 +147,36 @@ function handleJoin(
   return result(next, { alarmAtMs: nowMs + IDLE_CLEANUP_MS });
 }
 
+function isInPlay(phase: GamePhase): boolean {
+  return phase !== 'LOBBY' && phase !== 'PODIUM';
+}
+
+/**
+ * Mid-game the seat and score are KEPT and the player is only marked
+ * disconnected — three players must not be held hostage by one person's wifi,
+ * and that person must be able to rejoin. Spec §6.
+ */
 function handleLeave(
   state: GameState,
   event: Extract<EngineEvent, { type: 'PLAYER_LEAVE' }>,
   nowMs: number,
 ): EngineResult {
-  const remaining = state.players.filter((p) => p.id !== event.playerId);
-  if (remaining.length === state.players.length) return result(state);
+  const isSeated = state.players.some((p) => p.id === event.playerId);
+  if (!isSeated) return result(state);
 
+  if (isInPlay(state.phase)) {
+    const players = state.players.map((p) =>
+      p.id === event.playerId ? { ...p, connected: false } : p,
+    );
+    const next: GameState = { ...state, players };
+    const allGone = players.every((p) => !p.connected);
+
+    return allGone
+      ? result(next, { effect: { type: 'CLEANUP' } })
+      : result(next, { alarmAtMs: state.phaseEndsAtMs });
+  }
+
+  const remaining = state.players.filter((p) => p.id !== event.playerId);
   const nextHostId =
     state.hostId === event.playerId
       ? (remaining.slice().sort((a, b) => a.joinedAtMs - b.joinedAtMs)[0]?.id ?? null)
@@ -164,6 +187,32 @@ function handleLeave(
   return remaining.length === 0
     ? result(next, { effect: { type: 'CLEANUP' } })
     : result(next, { alarmAtMs: nowMs + IDLE_CLEANUP_MS });
+}
+
+function handleReconnect(state: GameState, playerId: string): EngineResult {
+  if (!state.players.some((p) => p.id === playerId)) return result(state);
+
+  const players = state.players.map((p) => (p.id === playerId ? { ...p, connected: true } : p));
+  return result({ ...state, players });
+}
+
+function handlePlayAgain(state: GameState, playerId: string): EngineResult {
+  if (playerId !== state.hostId) return rejected(state, 'NOT_HOST');
+  if (state.phase !== 'PODIUM') return rejected(state, 'BAD_PHASE');
+
+  const next: GameState = {
+    ...state,
+    phase: 'LOBBY',
+    players: state.players.map((p) => ({ ...p, score: 0 })),
+    questions: [],
+    questionIndex: 0,
+    questionShownAtMs: null,
+    answers: [],
+    phaseEndsAtMs: null,
+    error: null,
+  };
+
+  return result(next);
 }
 
 const GENERATION_TIMEOUT_MESSAGE = 'Question generation took too long. Try a smaller file.';
@@ -277,7 +326,8 @@ function handleSubmitAnswer(
     ),
   };
 
-  return next.answers.length >= next.players.length
+  const expected = next.players.filter((p) => p.connected).length;
+  return next.answers.length >= expected
     ? enterReveal(next, nowMs)
     : result(next, { alarmAtMs: state.phaseEndsAtMs });
 }
@@ -300,6 +350,10 @@ export function reduce(state: GameState, event: EngineEvent, nowMs: number): Eng
       return handleJoin(state, event, nowMs);
     case 'PLAYER_LEAVE':
       return handleLeave(state, event, nowMs);
+    case 'PLAYER_RECONNECT':
+      return handleReconnect(state, event.playerId);
+    case 'PLAY_AGAIN':
+      return handlePlayAgain(state, event.playerId);
     case 'OPEN_SETUP':
       return handleOpenSetup(state, event.playerId);
     case 'SUBMIT_SETUP':
