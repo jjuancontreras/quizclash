@@ -148,8 +148,8 @@ function handleJoin(
 }
 
 /**
- * True only for the phases where a round is actually running (questions
- * exist and scores are non-zero). Before COUNTDOWN — LOBBY, SETUP,
+ * True only for the phases where a round is underway and a seat may hold
+ * accumulated progress worth preserving. Before COUNTDOWN — LOBBY, SETUP,
  * GENERATING — there is nothing to preserve by keeping a disconnected
  * player's seat, and an absent host is actively harmful there because only
  * the host can advance the lobby. So SETUP/GENERATING free the seat exactly
@@ -197,7 +197,7 @@ function handleLeave(
 
   return remaining.length === 0
     ? result(next, { effect: { type: 'CLEANUP' } })
-    : result(next, { alarmAtMs: nowMs + IDLE_CLEANUP_MS });
+    : result(next, { alarmAtMs: state.phaseEndsAtMs ?? nowMs + IDLE_CLEANUP_MS });
 }
 
 function handleReconnect(state: GameState, playerId: string): EngineResult {

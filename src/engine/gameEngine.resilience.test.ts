@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'vitest';
 import { createInitialState, reduce } from './gameEngine.js';
-import { GENERATION_TIMEOUT_MS, QUESTION_WINDOW_MS, REVEAL_MS } from '../shared/constants.js';
+import {
+  GENERATION_TIMEOUT_MS,
+  IDLE_CLEANUP_MS,
+  QUESTION_WINDOW_MS,
+  REVEAL_MS,
+} from '../shared/constants.js';
 import type { GameState, Question, SetupConfig } from '../shared/types.js';
 
 const config: SetupConfig = { count: 5, difficulty: 'easy', focus: '', sourceKind: 'text' };
@@ -91,6 +96,20 @@ describe('PLAYER_LEAVE before a round is running', () => {
 
     const result = reduce(state, { type: 'GENERATION_SUCCEEDED', questions: questions(3) }, 400);
     expect(result.state.phase).toBe('COUNTDOWN');
+  });
+
+  test('preserves the pending generation deadline instead of replacing it with the idle-cleanup alarm', () => {
+    let state = reduce(createInitialState('ABCD'), { type: 'PLAYER_JOIN', playerId: 'p1', name: 'p1', avatarSeed: 's' }, 0).state;
+    state = reduce(state, { type: 'PLAYER_JOIN', playerId: 'p2', name: 'p2', avatarSeed: 's' }, 1).state;
+    state = reduce(state, { type: 'OPEN_SETUP', playerId: 'p1' }, 100).state;
+    const submitted = reduce(state, { type: 'SUBMIT_SETUP', playerId: 'p1', config }, 200);
+    state = submitted.state;
+    const generationDeadline = submitted.alarmAtMs;
+
+    const result = reduce(state, { type: 'PLAYER_LEAVE', playerId: 'p1' }, 300);
+
+    expect(result.alarmAtMs).toBe(generationDeadline);
+    expect(result.alarmAtMs).not.toBe(300 + IDLE_CLEANUP_MS);
   });
 
   test('a promoted host can recover the lobby after a stranded generation times out', () => {
