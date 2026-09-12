@@ -35,6 +35,19 @@ describe('OPEN_SETUP', () => {
     expect(result.state.phase).toBe('LOBBY');
     expect(result.broadcasts).toContainEqual({ type: 'REJECTED', reason: 'NOT_HOST' });
   });
+
+  test('rejects a non-host in the wrong phase with NOT_HOST, not BAD_PHASE', () => {
+    // Both guards would fire here (wrong actor AND wrong phase, already GENERATING).
+    // The host check must win so a guard-ordering regression is caught.
+    const setup = reduce(lobbyWith(['p1', 'p2']), { type: 'OPEN_SETUP', playerId: 'p1' }, 100).state;
+    const generating = reduce(setup, { type: 'SUBMIT_SETUP', playerId: 'p1', config }, 200).state;
+
+    const result = reduce(generating, { type: 'OPEN_SETUP', playerId: 'p2' }, 300);
+
+    expect(result.state.phase).toBe('GENERATING');
+    expect(result.broadcasts).toContainEqual({ type: 'REJECTED', reason: 'NOT_HOST' });
+    expect(result.broadcasts).not.toContainEqual({ type: 'REJECTED', reason: 'BAD_PHASE' });
+  });
 });
 
 describe('SUBMIT_SETUP', () => {
@@ -64,6 +77,16 @@ describe('SUBMIT_SETUP', () => {
   test('rejects setup submitted from the wrong phase', () => {
     const result = reduce(lobbyWith(['p1']), { type: 'SUBMIT_SETUP', playerId: 'p1', config }, 200);
     expect(result.broadcasts).toContainEqual({ type: 'REJECTED', reason: 'BAD_PHASE' });
+  });
+
+  test('rejects a non-host in the wrong phase with NOT_HOST, not BAD_PHASE', () => {
+    // Both guards would fire here (wrong actor AND wrong phase, still LOBBY).
+    // The host check must win so a guard-ordering regression is caught.
+    const result = reduce(lobbyWith(['p1', 'p2']), { type: 'SUBMIT_SETUP', playerId: 'p2', config }, 200);
+
+    expect(result.state.phase).toBe('LOBBY');
+    expect(result.broadcasts).toContainEqual({ type: 'REJECTED', reason: 'NOT_HOST' });
+    expect(result.broadcasts).not.toContainEqual({ type: 'REJECTED', reason: 'BAD_PHASE' });
   });
 });
 
@@ -113,5 +136,37 @@ describe('GENERATION_FAILED', () => {
     const result = reduce(generating(), { type: 'TIMEOUT' }, 200 + GENERATION_TIMEOUT_MS);
     expect(result.state.phase).toBe('SETUP');
     expect(result.state.error).not.toBeNull();
+  });
+
+  test('ignores a stale GENERATION_FAILED once the host has already recovered from a timeout', () => {
+    // Attempt A times out and the host is back in SETUP. A late rejection
+    // from attempt A must not clobber whatever the lobby is doing now.
+    const timedOut = reduce(generating(), { type: 'TIMEOUT' }, 200 + GENERATION_TIMEOUT_MS).state;
+
+    const result = reduce(
+      timedOut,
+      { type: 'GENERATION_FAILED', reason: 'a different, later-arriving failure' },
+      500,
+    );
+
+    expect(result.state).toEqual(timedOut);
+  });
+
+  test('ignores a stale GENERATION_FAILED once the lobby has moved on to COUNTDOWN', () => {
+    // Attempt A's rejection arrives after attempt B already succeeded and
+    // started the countdown. It must not overwrite the stored error or
+    // clear phaseEndsAtMs, which is non-null here (unlike the SETUP case).
+    const succeeded = reduce(generating(), { type: 'GENERATION_SUCCEEDED', questions: questions(5) }, 300).state;
+
+    const result = reduce(
+      succeeded,
+      { type: 'GENERATION_FAILED', reason: 'stale failure from an abandoned attempt' },
+      400,
+    );
+
+    expect(result.state).toEqual(succeeded);
+    expect(result.state.phase).toBe('COUNTDOWN');
+    expect(result.state.error).toBeNull();
+    expect(result.state.phaseEndsAtMs).toBe(succeeded.phaseEndsAtMs);
   });
 });

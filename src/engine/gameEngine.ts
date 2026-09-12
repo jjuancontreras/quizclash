@@ -213,6 +213,8 @@ function handleGenerationSucceeded(
 }
 
 function handleGenerationFailed(state: GameState, reason: string): EngineResult {
+  if (state.phase !== 'GENERATING') return result(state);
+
   return result({ ...state, phase: 'SETUP', error: reason, phaseEndsAtMs: null });
 }
 
