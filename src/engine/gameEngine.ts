@@ -1,10 +1,17 @@
-import { IDLE_CLEANUP_MS, MAX_NAME_CHARS, MAX_PLAYERS } from '../shared/constants.js';
+import {
+  COUNTDOWN_MS,
+  GENERATION_TIMEOUT_MS,
+  IDLE_CLEANUP_MS,
+  MAX_NAME_CHARS,
+  MAX_PLAYERS,
+} from '../shared/constants.js';
 import type {
   EngineEvent,
   EngineResult,
   GameState,
   Player,
   PublicState,
+  Question,
   ServerMessage,
 } from '../shared/types.js';
 
@@ -155,12 +162,78 @@ function handleLeave(
     : result(next, { alarmAtMs: nowMs + IDLE_CLEANUP_MS });
 }
 
+const GENERATION_TIMEOUT_MESSAGE = 'Question generation took too long. Try a smaller file.';
+
+function handleOpenSetup(state: GameState, playerId: string): EngineResult {
+  if (playerId !== state.hostId) return rejected(state, 'NOT_HOST');
+  if (state.phase !== 'LOBBY' && state.phase !== 'PODIUM') return rejected(state, 'BAD_PHASE');
+
+  return result({ ...state, phase: 'SETUP', error: null });
+}
+
+function handleSubmitSetup(
+  state: GameState,
+  event: Extract<EngineEvent, { type: 'SUBMIT_SETUP' }>,
+  nowMs: number,
+): EngineResult {
+  if (event.playerId !== state.hostId) return rejected(state, 'NOT_HOST');
+  if (state.phase !== 'SETUP') return rejected(state, 'BAD_PHASE');
+
+  const next: GameState = {
+    ...state,
+    phase: 'GENERATING',
+    error: null,
+    phaseEndsAtMs: nowMs + GENERATION_TIMEOUT_MS,
+  };
+
+  return result(next, {
+    alarmAtMs: nowMs + GENERATION_TIMEOUT_MS,
+    effect: { type: 'GENERATE', config: event.config },
+  });
+}
+
+function handleGenerationSucceeded(
+  state: GameState,
+  questions: readonly Question[],
+  nowMs: number,
+): EngineResult {
+  if (state.phase !== 'GENERATING') return result(state);
+
+  const next: GameState = {
+    ...state,
+    phase: 'COUNTDOWN',
+    questions,
+    questionIndex: 0,
+    answers: [],
+    error: null,
+    phaseEndsAtMs: nowMs + COUNTDOWN_MS,
+  };
+
+  return result(next, { alarmAtMs: nowMs + COUNTDOWN_MS });
+}
+
+function handleGenerationFailed(state: GameState, reason: string): EngineResult {
+  return result({ ...state, phase: 'SETUP', error: reason, phaseEndsAtMs: null });
+}
+
 export function reduce(state: GameState, event: EngineEvent, nowMs: number): EngineResult {
   switch (event.type) {
     case 'PLAYER_JOIN':
       return handleJoin(state, event, nowMs);
     case 'PLAYER_LEAVE':
       return handleLeave(state, event, nowMs);
+    case 'OPEN_SETUP':
+      return handleOpenSetup(state, event.playerId);
+    case 'SUBMIT_SETUP':
+      return handleSubmitSetup(state, event, nowMs);
+    case 'GENERATION_SUCCEEDED':
+      return handleGenerationSucceeded(state, event.questions, nowMs);
+    case 'GENERATION_FAILED':
+      return handleGenerationFailed(state, event.reason);
+    case 'TIMEOUT':
+      return state.phase === 'GENERATING'
+        ? handleGenerationFailed(state, GENERATION_TIMEOUT_MESSAGE)
+        : result(state);
     default:
       return result(state);
   }
