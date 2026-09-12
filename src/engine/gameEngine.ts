@@ -1,7 +1,9 @@
 import {
   COUNTDOWN_MS,
+  DEFAULT_AVATAR_SEED,
   GENERATION_TIMEOUT_MS,
   IDLE_CLEANUP_MS,
+  MAX_AVATAR_SEED_CHARS,
   MAX_NAME_CHARS,
   MAX_PLAYERS,
   QUESTION_WINDOW_MS,
@@ -50,6 +52,19 @@ export function sanitizeName(raw: string): string {
     .slice(0, MAX_NAME_CHARS)
     .trim();
   return cleaned.length === 0 ? 'Player' : cleaned;
+}
+
+/**
+ * The avatar seed is the other untrusted string a joining player supplies. It
+ * is rebroadcast in every STATE frame for the life of the lobby and is handed
+ * to an avatar service, so it is reduced to an alphabet that is safe in a URL
+ * path and harmless as text, then capped. Sanitized here rather than in the
+ * adapter, for the same reason the display name is: no caller of `reduce` can
+ * then seat an unsanitized one.
+ */
+export function sanitizeSeed(raw: string): string {
+  const cleaned = raw.replace(/[^A-Za-z0-9_-]/g, '').slice(0, MAX_AVATAR_SEED_CHARS);
+  return cleaned.length === 0 ? DEFAULT_AVATAR_SEED : cleaned;
 }
 
 /**
@@ -133,7 +148,7 @@ function handleJoin(
   const player: Player = {
     id: event.playerId,
     name,
-    avatarSeed: event.avatarSeed,
+    avatarSeed: sanitizeSeed(event.avatarSeed),
     score: 0,
     joinedAtMs: nowMs,
     connected: true,

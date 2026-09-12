@@ -23,12 +23,13 @@ export class GameRoom extends DurableObject<Env> {
   private state: GameState = createInitialState('');
   private pendingSource: QuizSource | null = null;
 
-  /** Test seams. Not called in production paths. */
+  /**
+   * Read-only test seam. Not called in production paths, and deliberately not
+   * paired with a setter: a whole-state overwrite is reachable over RPC by
+   * anyone holding a typed stub to this object.
+   */
   debugState(): GameState {
     return this.state;
-  }
-  debugSetState(next: GameState): void {
-    this.state = next;
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -88,6 +89,22 @@ export class GameRoom extends DurableObject<Env> {
   }
 
   async webSocketClose(ws: WebSocket): Promise<void> {
+    await this.releaseSocket(ws);
+  }
+
+  /**
+   * The hibernation API delivers an abnormally-terminated socket here rather
+   * than to webSocketClose. Without this, that seat never produces a
+   * PLAYER_LEAVE: it stays `connected: true` forever, so every later question
+   * waits out its full window for a player who is gone, the all-disconnected
+   * cleanup can never fire, and the seat blocks a rejoin.
+   */
+  async webSocketError(ws: WebSocket, error: unknown): Promise<void> {
+    console.error('GameRoom: websocket terminated abnormally', error);
+    await this.releaseSocket(ws);
+  }
+
+  private async releaseSocket(ws: WebSocket): Promise<void> {
     const meta = ws.deserializeAttachment() as SocketMeta | null;
     if (meta === null) return;
     const outcome = this.apply({ type: 'PLAYER_LEAVE', playerId: meta.playerId });

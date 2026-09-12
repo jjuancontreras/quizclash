@@ -21,6 +21,15 @@ export const MAX_EXPLANATION_CHARS = 150;
 /** Display names are untrusted input rendered on other players' screens. */
 export const MAX_NAME_CHARS = 16;
 
+/**
+ * Avatar seeds are untrusted input too: rebroadcast in every STATE frame and
+ * destined for an avatar service's URL. Long enough for any real seed.
+ */
+export const MAX_AVATAR_SEED_CHARS = 32;
+
+/** Used when a supplied avatar seed has nothing usable left in it. */
+export const DEFAULT_AVATAR_SEED = 'default';
+
 /** 10 MB — keeps PDFs under Gemini's inline base64 limit. Spec §8. */
 export const MAX_UPLOAD_BYTES = 10_485_760;
 
