@@ -1,6 +1,10 @@
 {
   "name": "quizclash",
   "main": "src/worker/index.ts",
+  // Must not be newer than the miniflare/workerd build bundled with the
+  // installed @cloudflare/vitest-pool-workers: that runtime rejects a
+  // compatibility_date it does not know, and every worker test fails to boot.
+  // Bump wrangler and the pool together, then raise this date.
   "compatibility_date": "2026-08-22",
   "compatibility_flags": ["nodejs_compat"],
   "durable_objects": {

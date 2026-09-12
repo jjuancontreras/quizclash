@@ -1576,7 +1576,7 @@ describe('sanitizeName', () => {
   });
 
   test('strips control characters that could break other players\' rendering', () => {
-    expect(sanitizeName('Ju an')).toBe('Juan');
+    expect(sanitizeName('Ju\x00an\x1b')).toBe('Juan');
   });
 
   test('falls back to a default when nothing usable remains', () => {
@@ -1705,7 +1705,7 @@ export function createInitialState(lobbyCode: string): GameState {
 export function sanitizeName(raw: string): string {
   const cleaned = raw
     // eslint-disable-next-line no-control-regex
-    .replace(/[ -]/g, '')
+    .replace(/[\x00-\x1f\x7f]/g, '')
     .trim()
     .slice(0, MAX_NAME_CHARS);
   return cleaned.length === 0 ? 'Player' : cleaned;
