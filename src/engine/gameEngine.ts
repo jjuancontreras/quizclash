@@ -23,20 +23,33 @@ export function createInitialState(lobbyCode: string): GameState {
   };
 }
 
-/** Display names are rendered on three other people's screens. Treat as hostile. */
+/**
+ * Display names are rendered on three other people's screens. Treat as hostile.
+ * Truncating to the display budget can land on a trailing space that wasn't at
+ * the edge before the cut, so the result is trimmed again and re-checked
+ * against the empty-name fallback.
+ */
 export function sanitizeName(raw: string): string {
   const cleaned = raw
     // eslint-disable-next-line no-control-regex
     .replace(/[\x00-\x1f\x7f]/g, '')
     .trim()
-    .slice(0, MAX_NAME_CHARS);
+    .slice(0, MAX_NAME_CHARS)
+    .trim();
   return cleaned.length === 0 ? 'Player' : cleaned;
 }
 
+/**
+ * `desired` is already within MAX_NAME_CHARS (sanitizeName's job). The
+ * numbered suffix must not push the total back over that budget, so the base
+ * is shortened to make room for it before appending.
+ */
 export function resolveNameCollision(desired: string, taken: readonly string[]): string {
   if (!taken.includes(desired)) return desired;
   for (let n = 2; n < 100; n++) {
-    const candidate = `${desired} (${n})`;
+    const suffix = ` (${n})`;
+    const base = desired.slice(0, Math.max(0, MAX_NAME_CHARS - suffix.length)).trimEnd();
+    const candidate = `${base}${suffix}`;
     if (!taken.includes(candidate)) return candidate;
   }
   return desired;
