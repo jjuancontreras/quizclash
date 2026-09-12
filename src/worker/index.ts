@@ -1,22 +1,45 @@
-import { GameRoom } from './GameRoom.js';
+import { generateLobbyCode, isValidLobbyCode, normalizeLobbyCode } from '../engine/lobbyCode.js';
 import type { Env } from './env.js';
 
-export { GameRoom };
+export { GameRoom } from './GameRoom.js';
 
-/**
- * The Worker's public entry point. Every lobby is one GameRoom Durable
- * Object instance, addressed by its lobby code; this handler's only job is
- * to route an incoming websocket upgrade to that instance.
- */
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+function routeWebSocket(request: Request, env: Env, url: URL): Response | Promise<Response> {
+  if (request.headers.get('Upgrade') !== 'websocket') {
+    return new Response('Expected a websocket upgrade', { status: 426 });
+  }
+
+  const code = normalizeLobbyCode(url.searchParams.get('code') ?? '');
+  if (!isValidLobbyCode(code)) {
+    return new Response('Invalid lobby code', { status: 400 });
+  }
+
+  // The code IS the routing key: one Durable Object per lobby.
+  const id = env.GAME_ROOM.idFromName(code);
+  const forwarded = new URL(request.url);
+  forwarded.searchParams.set('code', code);
+
+  return env.GAME_ROOM.get(id).fetch(new Request(forwarded, request));
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    const code = url.searchParams.get('code');
-    if (code === null || code === '') {
-      return new Response('Missing lobby code', { status: 400 });
+
+    if (url.pathname === '/api/lobby' && request.method === 'POST') {
+      return json({ code: generateLobbyCode() });
     }
 
-    const id = env.GAME_ROOM.idFromName(code);
-    return env.GAME_ROOM.get(id).fetch(request);
+    if (url.pathname === '/ws') {
+      return routeWebSocket(request, env, url);
+    }
+
+    return new Response('Not found', { status: 404 });
   },
-} satisfies ExportedHandler<Env>;
+};
