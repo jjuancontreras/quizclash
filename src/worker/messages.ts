@@ -3,8 +3,13 @@ import { MAX_UPLOAD_BYTES } from '../shared/constants.js';
 import { isChoiceIndex, type EngineEvent } from '../shared/types.js';
 import type { QuizSource } from '../quiz/geminiClient.js';
 
-/** Base64 inflates bytes by roughly 4/3, so the byte cap becomes a character cap. */
-export const MAX_UPLOAD_BASE64_CHARS = Math.ceil(MAX_UPLOAD_BYTES * 1.37);
+/**
+ * Base64 encodes every 3 input bytes as 4 output characters, padding the
+ * final group up to a full quantum — exactly `ceil(bytes / 3) * 4`. Using an
+ * approximate multiplier here would admit uploads past the documented byte
+ * cap.
+ */
+export const MAX_UPLOAD_BASE64_CHARS = Math.ceil(MAX_UPLOAD_BYTES / 3) * 4;
 
 const SetupMessageSchema = z.object({
   config: z.object({

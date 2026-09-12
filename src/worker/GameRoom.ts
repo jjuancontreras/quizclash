@@ -11,6 +11,14 @@ interface SocketMeta {
   readonly playerId: string;
 }
 
+/**
+ * Player-facing text for an alarm write that failed. The alarm is the game
+ * clock — every phase past COUNTDOWN advances only when it fires — so a
+ * rejected `setAlarm` must never disappear as a silent, unhandled rejection.
+ */
+const ALARM_SCHEDULING_FAILURE_MESSAGE =
+  'Lost the game clock. Refresh the page to reconnect.';
+
 export class GameRoom extends DurableObject<Env> {
   private state: GameState = createInitialState('');
   private pendingSource: QuizSource | null = null;
@@ -100,7 +108,16 @@ export class GameRoom extends DurableObject<Env> {
     const outcome = reduce(this.state, event, this.now());
     this.state = outcome.state;
     this.broadcast(outcome.broadcasts);
-    if (outcome.alarmAtMs !== null) void this.ctx.storage.setAlarm(outcome.alarmAtMs);
+    if (outcome.alarmAtMs !== null) {
+      // Not awaited — `apply` stays synchronous so `fetch` can still return
+      // its 101 upgrade response promptly. The rejection is still handled:
+      // a failed write is reported to every connected socket rather than
+      // becoming an unhandled rejection nobody ever learns about.
+      this.ctx.storage.setAlarm(outcome.alarmAtMs).catch((error: unknown) => {
+        console.error('GameRoom: failed to schedule the alarm', error);
+        this.broadcast([{ type: 'ERROR', message: ALARM_SCHEDULING_FAILURE_MESSAGE }]);
+      });
+    }
     return outcome;
   }
 

@@ -23,6 +23,25 @@ describe('GameRoom', () => {
     expect(response.status).toBe(426);
   });
 
+  test('sends the current state to the newly accepted socket immediately', async () => {
+    const stub = room('WXYZ');
+    const response = await stub.fetch('https://do/ws?code=WXYZ&name=Juan&seed=s1&playerId=p1', {
+      headers: { Upgrade: 'websocket' },
+    });
+
+    const client = response.webSocket;
+    if (client === null) throw new Error('expected a websocket in the response');
+    client.accept();
+
+    const first = await new Promise<MessageEvent>((resolve) => {
+      client.addEventListener('message', (event) => resolve(event), { once: true });
+    });
+
+    const message = JSON.parse(String(first.data)) as { type: string; state: { players: { id: string }[] } };
+    expect(message.type).toBe('STATE');
+    expect(message.state.players.map((p) => p.id)).toEqual(['p1']);
+  });
+
   test('holds engine state across separate requests to the same object', async () => {
     const stub = room('EFGH');
     await stub.fetch('https://do/ws?code=EFGH&name=Juan&seed=s&playerId=p1', {
