@@ -90,7 +90,7 @@ describe('SUBMIT_ANSWER', () => {
     expect(result.state.phase).toBe('QUESTION');
   });
 
-  test('ignores an answer arriving outside the QUESTION phase', () => {
+  test('ignores a repeat answer from a player even after the round has moved on', () => {
     let state = atFirstQuestion(['p1', 'p2']);
     state = answer(state, 'p1', 0, 1000).state;
     state = answer(state, 'p2', 0, 1100).state;
@@ -102,6 +102,22 @@ describe('SUBMIT_ANSWER', () => {
   test('ignores an answer from someone not seated in this lobby', () => {
     const result = answer(atFirstQuestion(['p1', 'p2']), 'ghost', 0, 1000);
     expect(result.state.answers).toHaveLength(0);
+  });
+
+  test('ignores an answer from a player who has not yet answered once the phase leaves QUESTION', () => {
+    let state = atFirstQuestion(['p1', 'p2', 'p3']);
+    state = answer(state, 'p1', 0, 1000).state;
+    // Window closes before p2/p3 answer: phase moves to REVEAL with only p1's answer recorded.
+    state = reduce(state, { type: 'TIMEOUT' }, 1000 + QUESTION_WINDOW_MS).state;
+    expect(state.phase).toBe('REVEAL');
+
+    // p2 never answered this question, so the duplicate-answer guard cannot be
+    // what stops this submission — only the phase guard can.
+    const late = answer(state, 'p2', 1, 1000 + QUESTION_WINDOW_MS + 100);
+
+    expect(late.state.answers).toEqual(state.answers);
+    expect(late.state.players.find((p) => p.id === 'p2')?.score).toBe(0);
+    expect(late.state.phase).toBe('REVEAL');
   });
 });
 
