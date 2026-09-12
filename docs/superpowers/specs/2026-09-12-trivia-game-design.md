@@ -89,9 +89,16 @@ Durable Object **storage** began billing in January 2026 — not incurred here, 
 | `COUNTDOWN` | 3 → 2 → 1, synced | 3s elapse |
 | `QUESTION` | Question, 4 choices, shrinking timer bar | All players answered **or** window expires |
 | `REVEAL` | Correct answer, explanation, source quote, delta, running scoreboard | 5s elapse |
-| `PODIUM` | Final 1–4 ranking, confetti | Host starts a new round, or all leave |
+| `PODIUM` | Final 1–4 ranking, confetti | Host chooses "Play again", or all leave |
 
 `QUESTION → REVEAL` advances as soon as all four have answered, so the fastest player is not left staring at a dead screen.
+
+### Rules that close ambiguities in the above
+
+- **The host plays.** They occupy one of the four seats and are scored like anyone else. This is why the rejected host-preview idea in §8 breaks the game rather than merely bending it.
+- **"Play again" returns the lobby to `LOBBY` with scores reset and the same players seated.** It does *not* replay the same questions — a fresh `SETUP` and generation is required, because replaying a known answer key is not a game. Reusing the previous quiz is part of the deferred quiz-library feature (§11).
+- **A fifth player attempting to join is rejected** with "This lobby is full" and returned to the join screen. The lobby cap is enforced in the Durable Object, not the UI.
+- **Duplicate display names inside one lobby are disambiguated with a numeric suffix** (`Juan`, `Juan (2)`). Names are trimmed, capped at 16 characters, and stripped of control characters on arrival — the display name is untrusted input rendered on three other people's screens.
 
 ### Scoring
 
