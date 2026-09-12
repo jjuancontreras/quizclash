@@ -54,6 +54,13 @@ export interface GameState {
   readonly answers: readonly Answer[];
   readonly phaseEndsAtMs: number | null;
   readonly error: string | null;
+  /**
+   * Identifies the generation attempt the lobby is currently waiting on.
+   * Incremented by every SUBMIT_SETUP. Phase alone cannot tell a fresh
+   * attempt from an abandoned one — after a timeout and a retry the phase is
+   * GENERATING for both — so results must name the attempt they belong to.
+   */
+  readonly generationId: number;
 }
 
 /** Events the reducer accepts. All external input becomes one of these. */
@@ -63,8 +70,12 @@ export type EngineEvent =
   | { readonly type: 'PLAYER_RECONNECT'; readonly playerId: string }
   | { readonly type: 'OPEN_SETUP'; readonly playerId: string }
   | { readonly type: 'SUBMIT_SETUP'; readonly playerId: string; readonly config: SetupConfig }
-  | { readonly type: 'GENERATION_SUCCEEDED'; readonly questions: readonly Question[] }
-  | { readonly type: 'GENERATION_FAILED'; readonly reason: string }
+  | {
+      readonly type: 'GENERATION_SUCCEEDED';
+      readonly generationId: number;
+      readonly questions: readonly Question[];
+    }
+  | { readonly type: 'GENERATION_FAILED'; readonly generationId: number; readonly reason: string }
   | { readonly type: 'SUBMIT_ANSWER'; readonly playerId: string; readonly choiceIndex: ChoiceIndex }
   | { readonly type: 'PLAY_AGAIN'; readonly playerId: string }
   | { readonly type: 'TIMEOUT' };
@@ -99,7 +110,7 @@ export interface PublicState {
 
 /** Side effects the reducer requests but never performs itself. */
 export type EngineEffect =
-  | { readonly type: 'GENERATE'; readonly config: SetupConfig }
+  | { readonly type: 'GENERATE'; readonly generationId: number; readonly config: SetupConfig }
   | { readonly type: 'CLEANUP' };
 
 export interface EngineResult {

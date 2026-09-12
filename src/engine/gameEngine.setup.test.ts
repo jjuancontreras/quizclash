@@ -59,7 +59,7 @@ describe('SUBMIT_SETUP', () => {
     const result = reduce(inSetup(), { type: 'SUBMIT_SETUP', playerId: 'p1', config }, 200);
 
     expect(result.state.phase).toBe('GENERATING');
-    expect(result.effect).toEqual({ type: 'GENERATE', config });
+    expect(result.effect).toEqual({ type: 'GENERATE', generationId: result.state.generationId, config });
   });
 
   test('arms a generation timeout so a hung model cannot strand the lobby', () => {
@@ -97,25 +97,90 @@ describe('GENERATION_SUCCEEDED', () => {
   }
 
   test('stores the questions and starts the countdown', () => {
-    const result = reduce(generating(), { type: 'GENERATION_SUCCEEDED', questions: questions(5) }, 300);
+    const state = generating();
+    const result = reduce(
+      state,
+      { type: 'GENERATION_SUCCEEDED', generationId: state.generationId, questions: questions(5) },
+      300,
+    );
 
     expect(result.state.phase).toBe('COUNTDOWN');
     expect(result.state.questions).toHaveLength(5);
   });
 
   test('schedules the first question exactly one countdown later', () => {
-    const result = reduce(generating(), { type: 'GENERATION_SUCCEEDED', questions: questions(5) }, 300);
+    const state = generating();
+    const result = reduce(
+      state,
+      { type: 'GENERATION_SUCCEEDED', generationId: state.generationId, questions: questions(5) },
+      300,
+    );
 
     expect(result.state.phaseEndsAtMs).toBe(300 + COUNTDOWN_MS);
     expect(result.alarmAtMs).toBe(300 + COUNTDOWN_MS);
   });
 
   test('clears any error left over from a previous failed attempt', () => {
-    const failed = reduce(generating(), { type: 'GENERATION_FAILED', reason: 'boom' }, 300).state;
+    const first = generating();
+    const failed = reduce(
+      first,
+      { type: 'GENERATION_FAILED', generationId: first.generationId, reason: 'boom' },
+      300,
+    ).state;
     const retried = reduce(failed, { type: 'SUBMIT_SETUP', playerId: 'p1', config }, 400).state;
-    const result = reduce(retried, { type: 'GENERATION_SUCCEEDED', questions: questions(5) }, 500);
+    const result = reduce(
+      retried,
+      { type: 'GENERATION_SUCCEEDED', generationId: retried.generationId, questions: questions(5) },
+      500,
+    );
 
     expect(result.state.error).toBeNull();
+  });
+
+  /**
+   * The phase check alone cannot see this one: attempt A timed out, the host
+   * retried, and the lobby is in GENERATING again — for attempt B. When A's
+   * abandoned promise finally settles, only the attempt's own identity tells
+   * the two apart. Accepting A here plays A's questions and lets A's
+   * COUNTDOWN alarm overwrite B's timeout.
+   */
+  test('ignores a stale GENERATION_SUCCEEDED that lands while a retry is generating', () => {
+    const first = generating();
+    const timedOut = reduce(first, { type: 'TIMEOUT' }, 200 + GENERATION_TIMEOUT_MS).state;
+    const retrying = reduce(
+      timedOut,
+      { type: 'SUBMIT_SETUP', playerId: 'p1', config },
+      300 + GENERATION_TIMEOUT_MS,
+    ).state;
+
+    const result = reduce(
+      retrying,
+      { type: 'GENERATION_SUCCEEDED', generationId: first.generationId, questions: questions(5) },
+      400 + GENERATION_TIMEOUT_MS,
+    );
+
+    expect(result.state).toEqual(retrying);
+    expect(result.state.phase).toBe('GENERATING');
+    expect(result.alarmAtMs).toBeNull();
+  });
+
+  test('accepts the result of the attempt that is actually in flight', () => {
+    const first = generating();
+    const timedOut = reduce(first, { type: 'TIMEOUT' }, 200 + GENERATION_TIMEOUT_MS).state;
+    const retrying = reduce(
+      timedOut,
+      { type: 'SUBMIT_SETUP', playerId: 'p1', config },
+      300 + GENERATION_TIMEOUT_MS,
+    ).state;
+
+    const result = reduce(
+      retrying,
+      { type: 'GENERATION_SUCCEEDED', generationId: retrying.generationId, questions: questions(5) },
+      400 + GENERATION_TIMEOUT_MS,
+    );
+
+    expect(result.state.phase).toBe('COUNTDOWN');
+    expect(retrying.generationId).not.toBe(first.generationId);
   });
 });
 
@@ -126,10 +191,35 @@ describe('GENERATION_FAILED', () => {
   }
 
   test('returns the host to SETUP so they can retry, never stranding the lobby', () => {
-    const result = reduce(generating(), { type: 'GENERATION_FAILED', reason: 'bad file' }, 300);
+    const state = generating();
+    const result = reduce(
+      state,
+      { type: 'GENERATION_FAILED', generationId: state.generationId, reason: 'bad file' },
+      300,
+    );
 
     expect(result.state.phase).toBe('SETUP');
     expect(result.state.error).toBe('bad file');
+  });
+
+  test('ignores a stale GENERATION_FAILED that lands while a retry is generating', () => {
+    const first = generating();
+    const timedOut = reduce(first, { type: 'TIMEOUT' }, 200 + GENERATION_TIMEOUT_MS).state;
+    const retrying = reduce(
+      timedOut,
+      { type: 'SUBMIT_SETUP', playerId: 'p1', config },
+      300 + GENERATION_TIMEOUT_MS,
+    ).state;
+
+    const result = reduce(
+      retrying,
+      { type: 'GENERATION_FAILED', generationId: first.generationId, reason: 'attempt A gave up' },
+      400 + GENERATION_TIMEOUT_MS,
+    );
+
+    expect(result.state).toEqual(retrying);
+    expect(result.state.phase).toBe('GENERATING');
+    expect(result.state.error).toBeNull();
   });
 
   test('a generation timeout fails the same way as a model error', () => {
@@ -145,7 +235,11 @@ describe('GENERATION_FAILED', () => {
 
     const result = reduce(
       timedOut,
-      { type: 'GENERATION_FAILED', reason: 'a different, later-arriving failure' },
+      {
+        type: 'GENERATION_FAILED',
+        generationId: timedOut.generationId,
+        reason: 'a different, later-arriving failure',
+      },
       500,
     );
 
@@ -156,11 +250,20 @@ describe('GENERATION_FAILED', () => {
     // Attempt A's rejection arrives after attempt B already succeeded and
     // started the countdown. It must not overwrite the stored error or
     // clear phaseEndsAtMs, which is non-null here (unlike the SETUP case).
-    const succeeded = reduce(generating(), { type: 'GENERATION_SUCCEEDED', questions: questions(5) }, 300).state;
+    const state = generating();
+    const succeeded = reduce(
+      state,
+      { type: 'GENERATION_SUCCEEDED', generationId: state.generationId, questions: questions(5) },
+      300,
+    ).state;
 
     const result = reduce(
       succeeded,
-      { type: 'GENERATION_FAILED', reason: 'stale failure from an abandoned attempt' },
+      {
+        type: 'GENERATION_FAILED',
+        generationId: succeeded.generationId,
+        reason: 'stale failure from an abandoned attempt',
+      },
       400,
     );
 

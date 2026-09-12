@@ -36,7 +36,7 @@ function atFirstQuestion(playerIds: string[], count = 3): GameState {
   );
   state = reduce(state, { type: 'OPEN_SETUP', playerId: playerIds[0]! }, 100).state;
   state = reduce(state, { type: 'SUBMIT_SETUP', playerId: playerIds[0]!, config }, 200).state;
-  state = reduce(state, { type: 'GENERATION_SUCCEEDED', questions: questions(count) }, 300).state;
+  state = reduce(state, { type: 'GENERATION_SUCCEEDED', generationId: state.generationId, questions: questions(count) }, 300).state;
   return reduce(state, { type: 'TIMEOUT' }, 1000).state;
 }
 
@@ -136,7 +136,7 @@ describe('PLAYER_LEAVE before a round is running', () => {
     expect(state.hostId).toBe('p2');
     expect(state.phase).toBe('GENERATING');
 
-    const result = reduce(state, { type: 'GENERATION_SUCCEEDED', questions: questions(3) }, 400);
+    const result = reduce(state, { type: 'GENERATION_SUCCEEDED', generationId: state.generationId, questions: questions(3) }, 400);
     expect(result.state.phase).toBe('COUNTDOWN');
   });
 

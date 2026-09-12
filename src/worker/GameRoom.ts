@@ -145,9 +145,18 @@ export class GameRoom extends DurableObject<Env> {
       return;
     }
 
+    // Both are captured before the first `await`: by the time the model
+    // answers, the host may have timed out and retried, leaving a different
+    // attempt in flight. The engine rejects this result if so.
     const source = this.pendingSource;
+    const { generationId } = effect;
+
     if (source === null) {
-      this.apply({ type: 'GENERATION_FAILED', reason: 'No study material was received.' });
+      this.apply({
+        type: 'GENERATION_FAILED',
+        generationId,
+        reason: 'No study material was received.',
+      });
       return;
     }
 
@@ -156,8 +165,8 @@ export class GameRoom extends DurableObject<Env> {
 
     this.apply(
       outcome.ok
-        ? { type: 'GENERATION_SUCCEEDED', questions: outcome.questions }
-        : { type: 'GENERATION_FAILED', reason: outcome.reason },
+        ? { type: 'GENERATION_SUCCEEDED', generationId, questions: outcome.questions }
+        : { type: 'GENERATION_FAILED', generationId, reason: outcome.reason },
     );
   }
 }

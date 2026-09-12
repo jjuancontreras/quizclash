@@ -32,6 +32,7 @@ export function createInitialState(lobbyCode: string): GameState {
     answers: [],
     phaseEndsAtMs: null,
     error: null,
+    generationId: 0,
   };
 }
 
@@ -286,25 +287,41 @@ function handleSubmitSetup(
   if (event.playerId !== state.hostId) return rejected(state, 'NOT_HOST');
   if (state.phase !== 'SETUP') return rejected(state, 'BAD_PHASE');
 
+  // A new attempt gets a new identity, which is what makes the previous
+  // attempt's late result recognisably stale. `runEffect` has no abort, so an
+  // abandoned attempt really does keep running and really does come back.
+  const generationId = state.generationId + 1;
+
   const next: GameState = {
     ...state,
     phase: 'GENERATING',
     error: null,
     phaseEndsAtMs: nowMs + GENERATION_TIMEOUT_MS,
+    generationId,
   };
 
   return result(next, {
     alarmAtMs: nowMs + GENERATION_TIMEOUT_MS,
-    effect: { type: 'GENERATE', config: event.config },
+    effect: { type: 'GENERATE', generationId, config: event.config },
   });
+}
+
+/**
+ * A result belongs to the lobby only if it names the attempt the lobby is
+ * still waiting on. The phase check alone accepts attempt A's result while
+ * attempt B is in flight, because both leave the phase at GENERATING.
+ */
+function isCurrentGeneration(state: GameState, generationId: number): boolean {
+  return state.phase === 'GENERATING' && state.generationId === generationId;
 }
 
 function handleGenerationSucceeded(
   state: GameState,
-  questions: readonly Question[],
+  event: Extract<EngineEvent, { type: 'GENERATION_SUCCEEDED' }>,
   nowMs: number,
 ): EngineResult {
-  if (state.phase !== 'GENERATING') return result(state);
+  if (!isCurrentGeneration(state, event.generationId)) return result(state);
+  const { questions } = event;
 
   const next: GameState = {
     ...state,
@@ -319,10 +336,18 @@ function handleGenerationSucceeded(
   return result(next, { alarmAtMs: nowMs + COUNTDOWN_MS });
 }
 
-function handleGenerationFailed(state: GameState, reason: string): EngineResult {
-  if (state.phase !== 'GENERATING') return result(state);
-
+/** The unconditional transition. Only the TIMEOUT path may reach it directly. */
+function failGeneration(state: GameState, reason: string): EngineResult {
   return result({ ...state, phase: 'SETUP', error: reason, phaseEndsAtMs: null });
+}
+
+function handleGenerationFailed(
+  state: GameState,
+  event: Extract<EngineEvent, { type: 'GENERATION_FAILED' }>,
+): EngineResult {
+  if (!isCurrentGeneration(state, event.generationId)) return result(state);
+
+  return failGeneration(state, event.reason);
 }
 
 function showQuestion(state: GameState, index: number, nowMs: number): EngineResult {
@@ -429,14 +454,14 @@ export function reduce(state: GameState, event: EngineEvent, nowMs: number): Eng
     case 'SUBMIT_SETUP':
       return handleSubmitSetup(state, event, nowMs);
     case 'GENERATION_SUCCEEDED':
-      return handleGenerationSucceeded(state, event.questions, nowMs);
+      return handleGenerationSucceeded(state, event, nowMs);
     case 'GENERATION_FAILED':
-      return handleGenerationFailed(state, event.reason);
+      return handleGenerationFailed(state, event);
     case 'SUBMIT_ANSWER':
       return handleSubmitAnswer(state, event, nowMs);
     case 'TIMEOUT':
       return state.phase === 'GENERATING'
-        ? handleGenerationFailed(state, GENERATION_TIMEOUT_MESSAGE)
+        ? failGeneration(state, GENERATION_TIMEOUT_MESSAGE)
         : handleRoundTimeout(state, nowMs);
     default:
       return result(state);

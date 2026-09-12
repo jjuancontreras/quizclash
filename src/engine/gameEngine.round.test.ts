@@ -24,7 +24,7 @@ function atFirstQuestion(playerIds: string[], count = 5): GameState {
   );
   state = reduce(state, { type: 'OPEN_SETUP', playerId: playerIds[0]! }, 100).state;
   state = reduce(state, { type: 'SUBMIT_SETUP', playerId: playerIds[0]!, config }, 200).state;
-  state = reduce(state, { type: 'GENERATION_SUCCEEDED', questions: questions(count) }, 300).state;
+  state = reduce(state, { type: 'GENERATION_SUCCEEDED', generationId: state.generationId, questions: questions(count) }, 300).state;
   return reduce(state, { type: 'TIMEOUT' }, 1000).state;
 }
 
@@ -44,7 +44,7 @@ describe('countdown expiry', () => {
     let state = reduce(createInitialState('ABCD'), { type: 'PLAYER_JOIN', playerId: 'p1', name: 'p1', avatarSeed: 's' }, 0).state;
     state = reduce(state, { type: 'OPEN_SETUP', playerId: 'p1' }, 100).state;
     state = reduce(state, { type: 'SUBMIT_SETUP', playerId: 'p1', config }, 200).state;
-    state = reduce(state, { type: 'GENERATION_SUCCEEDED', questions: questions(5) }, 300).state;
+    state = reduce(state, { type: 'GENERATION_SUCCEEDED', generationId: state.generationId, questions: questions(5) }, 300).state;
     const result = reduce(state, { type: 'TIMEOUT' }, 1000);
 
     expect(result.alarmAtMs).toBe(1000 + QUESTION_WINDOW_MS);
