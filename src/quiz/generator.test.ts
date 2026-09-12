@@ -101,6 +101,6 @@ describe('generateQuiz', () => {
     const result = await generateQuiz(model, source, config, () => 0.5);
 
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).not.toContain('sk-secret');
+    if (!result.ok) expect(result.reason).toBe(GENERATION_FAILURE_MESSAGE);
   });
 });
