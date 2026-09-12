@@ -20,6 +20,12 @@ export interface QuizModel {
 export const DEFAULT_GEMINI_MODEL = 'gemini-flash-latest';
 
 /**
+ * Generation temperature. Higher values vary question phrasing; lower values
+ * stay closer to the material. Tunable for question quality and diversity.
+ */
+export const QUIZ_GENERATION_TEMPERATURE = 0.7;
+
+/**
  * Material is wrapped in explicit delimiters and placed BEFORE the prompt, so
  * the instructions are the last thing read and anything instruction-shaped
  * inside the material is visibly framed as data. Spec §8.
@@ -47,7 +53,7 @@ export function createGeminiModel(
         config: {
           responseMimeType: 'application/json',
           responseSchema: QUIZ_RESPONSE_SCHEMA,
-          temperature: 0.7,
+          temperature: QUIZ_GENERATION_TEMPERATURE,
         },
       });
 
