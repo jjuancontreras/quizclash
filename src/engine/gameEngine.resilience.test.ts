@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { createInitialState, reduce } from './gameEngine.js';
-import { QUESTION_WINDOW_MS, REVEAL_MS } from '../shared/constants.js';
+import { GENERATION_TIMEOUT_MS, QUESTION_WINDOW_MS, REVEAL_MS } from '../shared/constants.js';
 import type { GameState, Question, SetupConfig } from '../shared/types.js';
 
 const config: SetupConfig = { count: 5, difficulty: 'easy', focus: '', sourceKind: 'text' };
@@ -63,6 +63,49 @@ describe('PLAYER_LEAVE mid-game', () => {
     const result = reduce(state, { type: 'PLAYER_LEAVE', playerId: 'p2' }, 1200);
 
     expect(result.effect).toEqual({ type: 'CLEANUP' });
+  });
+});
+
+describe('PLAYER_LEAVE before a round is running', () => {
+  test('frees the seat and promotes a new host when the host drops during SETUP', () => {
+    let state = reduce(createInitialState('ABCD'), { type: 'PLAYER_JOIN', playerId: 'p1', name: 'p1', avatarSeed: 's' }, 0).state;
+    state = reduce(state, { type: 'PLAYER_JOIN', playerId: 'p2', name: 'p2', avatarSeed: 's' }, 1).state;
+    state = reduce(state, { type: 'OPEN_SETUP', playerId: 'p1' }, 100).state;
+
+    const result = reduce(state, { type: 'PLAYER_LEAVE', playerId: 'p1' }, 200);
+
+    expect(result.state.players).toHaveLength(1);
+    expect(result.state.hostId).toBe('p2');
+  });
+
+  test('frees the seat and promotes a new host when the host drops during GENERATING, and generation still completes into COUNTDOWN', () => {
+    let state = reduce(createInitialState('ABCD'), { type: 'PLAYER_JOIN', playerId: 'p1', name: 'p1', avatarSeed: 's' }, 0).state;
+    state = reduce(state, { type: 'PLAYER_JOIN', playerId: 'p2', name: 'p2', avatarSeed: 's' }, 1).state;
+    state = reduce(state, { type: 'OPEN_SETUP', playerId: 'p1' }, 100).state;
+    state = reduce(state, { type: 'SUBMIT_SETUP', playerId: 'p1', config }, 200).state;
+
+    state = reduce(state, { type: 'PLAYER_LEAVE', playerId: 'p1' }, 300).state;
+    expect(state.players).toHaveLength(1);
+    expect(state.hostId).toBe('p2');
+    expect(state.phase).toBe('GENERATING');
+
+    const result = reduce(state, { type: 'GENERATION_SUCCEEDED', questions: questions(3) }, 400);
+    expect(result.state.phase).toBe('COUNTDOWN');
+  });
+
+  test('a promoted host can recover the lobby after a stranded generation times out', () => {
+    let state = reduce(createInitialState('ABCD'), { type: 'PLAYER_JOIN', playerId: 'p1', name: 'p1', avatarSeed: 's' }, 0).state;
+    state = reduce(state, { type: 'PLAYER_JOIN', playerId: 'p2', name: 'p2', avatarSeed: 's' }, 1).state;
+    state = reduce(state, { type: 'OPEN_SETUP', playerId: 'p1' }, 100).state;
+    state = reduce(state, { type: 'SUBMIT_SETUP', playerId: 'p1', config }, 200).state;
+    state = reduce(state, { type: 'PLAYER_LEAVE', playerId: 'p1' }, 300).state;
+
+    state = reduce(state, { type: 'TIMEOUT' }, 200 + GENERATION_TIMEOUT_MS).state;
+    expect(state.phase).toBe('SETUP');
+    expect(state.hostId).toBe('p2');
+
+    const result = reduce(state, { type: 'OPEN_SETUP', playerId: 'p2' }, 200 + GENERATION_TIMEOUT_MS + 1);
+    expect(result.broadcasts).not.toContainEqual({ type: 'REJECTED', reason: 'NOT_HOST' });
   });
 });
 

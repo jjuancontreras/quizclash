@@ -147,14 +147,25 @@ function handleJoin(
   return result(next, { alarmAtMs: nowMs + IDLE_CLEANUP_MS });
 }
 
-function isInPlay(phase: GamePhase): boolean {
-  return phase !== 'LOBBY' && phase !== 'PODIUM';
+/**
+ * True only for the phases where a round is actually running (questions
+ * exist and scores are non-zero). Before COUNTDOWN — LOBBY, SETUP,
+ * GENERATING — there is nothing to preserve by keeping a disconnected
+ * player's seat, and an absent host is actively harmful there because only
+ * the host can advance the lobby. So SETUP/GENERATING free the seat exactly
+ * like LOBBY does, not like QUESTION/REVEAL.
+ */
+function isRoundRunning(phase: GamePhase): boolean {
+  return phase === 'COUNTDOWN' || phase === 'QUESTION' || phase === 'REVEAL';
 }
 
 /**
- * Mid-game the seat and score are KEPT and the player is only marked
- * disconnected — three players must not be held hostage by one person's wifi,
- * and that person must be able to rejoin. Spec §6.
+ * Mid-game (once a round is running) the seat and score are KEPT and the
+ * player is only marked disconnected — three players must not be held
+ * hostage by one person's wifi, and that person must be able to rejoin.
+ * Spec §6. Before a round is running (LOBBY, SETUP, GENERATING) the seat is
+ * freed exactly as in the lobby, since there is no score to preserve and a
+ * missing host would otherwise strand the room.
  */
 function handleLeave(
   state: GameState,
@@ -164,7 +175,7 @@ function handleLeave(
   const isSeated = state.players.some((p) => p.id === event.playerId);
   if (!isSeated) return result(state);
 
-  if (isInPlay(state.phase)) {
+  if (isRoundRunning(state.phase)) {
     const players = state.players.map((p) =>
       p.id === event.playerId ? { ...p, connected: false } : p,
     );
