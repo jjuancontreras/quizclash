@@ -4,8 +4,11 @@ import {
   IDLE_CLEANUP_MS,
   MAX_NAME_CHARS,
   MAX_PLAYERS,
+  QUESTION_WINDOW_MS,
+  REVEAL_MS,
 } from '../shared/constants.js';
 import type {
+  Answer,
   EngineEvent,
   EngineResult,
   GameState,
@@ -14,6 +17,7 @@ import type {
   Question,
   ServerMessage,
 } from '../shared/types.js';
+import { scoreAnswer } from './scoring.js';
 
 export function createInitialState(lobbyCode: string): GameState {
   return {
@@ -218,6 +222,78 @@ function handleGenerationFailed(state: GameState, reason: string): EngineResult 
   return result({ ...state, phase: 'SETUP', error: reason, phaseEndsAtMs: null });
 }
 
+function showQuestion(state: GameState, index: number, nowMs: number): EngineResult {
+  const next: GameState = {
+    ...state,
+    phase: 'QUESTION',
+    questionIndex: index,
+    questionShownAtMs: nowMs,
+    answers: [],
+    phaseEndsAtMs: nowMs + QUESTION_WINDOW_MS,
+  };
+  return result(next, { alarmAtMs: nowMs + QUESTION_WINDOW_MS });
+}
+
+function enterReveal(state: GameState, nowMs: number): EngineResult {
+  const next: GameState = { ...state, phase: 'REVEAL', phaseEndsAtMs: nowMs + REVEAL_MS };
+  return result(next, { alarmAtMs: nowMs + REVEAL_MS });
+}
+
+function enterPodium(state: GameState): EngineResult {
+  return result({ ...state, phase: 'PODIUM', phaseEndsAtMs: null, questionShownAtMs: null });
+}
+
+function handleSubmitAnswer(
+  state: GameState,
+  event: Extract<EngineEvent, { type: 'SUBMIT_ANSWER' }>,
+  nowMs: number,
+): EngineResult {
+  if (state.phase !== 'QUESTION' || state.questionShownAtMs === null) return result(state);
+  if (!state.players.some((p) => p.id === event.playerId)) return result(state);
+  if (state.answers.some((a) => a.playerId === event.playerId)) return result(state);
+
+  const question = state.questions[state.questionIndex];
+  if (question === undefined) return result(state);
+
+  const points = scoreAnswer({
+    answeredAtMs: nowMs,
+    shownAtMs: state.questionShownAtMs,
+    windowMs: QUESTION_WINDOW_MS,
+    isCorrect: event.choiceIndex === question.correctIndex,
+  });
+
+  const answer: Answer = {
+    playerId: event.playerId,
+    choiceIndex: event.choiceIndex,
+    answeredAtMs: nowMs,
+    points,
+  };
+
+  const next: GameState = {
+    ...state,
+    answers: [...state.answers, answer],
+    players: state.players.map((p) =>
+      p.id === event.playerId ? { ...p, score: p.score + points } : p,
+    ),
+  };
+
+  return next.answers.length >= next.players.length
+    ? enterReveal(next, nowMs)
+    : result(next, { alarmAtMs: state.phaseEndsAtMs });
+}
+
+function handleRoundTimeout(state: GameState, nowMs: number): EngineResult {
+  if (state.phase === 'COUNTDOWN') return showQuestion(state, 0, nowMs);
+  if (state.phase === 'QUESTION') return enterReveal(state, nowMs);
+  if (state.phase === 'REVEAL') {
+    const nextIndex = state.questionIndex + 1;
+    return nextIndex >= state.questions.length
+      ? enterPodium(state)
+      : showQuestion(state, nextIndex, nowMs);
+  }
+  return result(state);
+}
+
 export function reduce(state: GameState, event: EngineEvent, nowMs: number): EngineResult {
   switch (event.type) {
     case 'PLAYER_JOIN':
@@ -232,10 +308,12 @@ export function reduce(state: GameState, event: EngineEvent, nowMs: number): Eng
       return handleGenerationSucceeded(state, event.questions, nowMs);
     case 'GENERATION_FAILED':
       return handleGenerationFailed(state, event.reason);
+    case 'SUBMIT_ANSWER':
+      return handleSubmitAnswer(state, event, nowMs);
     case 'TIMEOUT':
       return state.phase === 'GENERATING'
         ? handleGenerationFailed(state, GENERATION_TIMEOUT_MESSAGE)
-        : result(state);
+        : handleRoundTimeout(state, nowMs);
     default:
       return result(state);
   }
