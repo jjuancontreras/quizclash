@@ -436,8 +436,11 @@ function handleSubmitAnswer(
     ),
   };
 
-  const expected = next.players.filter((p) => p.connected).length;
-  return next.answers.length >= expected
+  // Per player, not a count: a disconnected player's answer stays in
+  // `answers` because it holds their score, so comparing totals lets a
+  // departed player's answer stand in for a connected player's missing one
+  // and reveals the round while someone is still waiting to play.
+  return everyConnectedPlayerAnswered(next)
     ? enterReveal(next, nowMs)
     : result(next, { alarmAtMs: next.phaseEndsAtMs });
 }

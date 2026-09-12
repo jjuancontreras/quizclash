@@ -90,6 +90,38 @@ describe('SUBMIT_ANSWER', () => {
     expect(result.state.phase).toBe('QUESTION');
   });
 
+  /**
+   * A disconnected player's answer stays in `state.answers` — it is what
+   * holds their score. Comparing the NUMBER of answers against the NUMBER of
+   * connected players therefore lets a departed player's answer stand in for
+   * a live player's missing one: below, p1's answer covers p3, and the round
+   * reveals while p3 is still connected and still waiting. From the table it
+   * just looks like the question skipped. The completion test must ask
+   * "has every connected player answered", per player.
+   */
+  test('does not reveal while a connected player still owes an answer, even after an answered player disconnects', () => {
+    let state = atFirstQuestion(['p1', 'p2', 'p3']);
+    state = answer(state, 'p1', 0, 1100).state;
+    state = reduce(state, { type: 'PLAYER_LEAVE', playerId: 'p1' }, 1200).state;
+
+    const result = answer(state, 'p2', 0, 1300);
+
+    expect(result.state.phase).toBe('QUESTION');
+    expect(result.state.answers.some((a) => a.playerId === 'p3')).toBe(false);
+  });
+
+  test('lets the last connected player take the turn a count comparison would have stolen', () => {
+    let state = atFirstQuestion(['p1', 'p2', 'p3']);
+    state = answer(state, 'p1', 0, 1100).state;
+    state = reduce(state, { type: 'PLAYER_LEAVE', playerId: 'p1' }, 1200).state;
+    state = answer(state, 'p2', 0, 1300).state;
+
+    const result = answer(state, 'p3', 0, 1400);
+
+    expect(result.state.phase).toBe('REVEAL');
+    expect(result.state.players.find((p) => p.id === 'p3')?.score).toBeGreaterThan(0);
+  });
+
   test('ignores a repeat answer from a player even after the round has moved on', () => {
     let state = atFirstQuestion(['p1', 'p2']);
     state = answer(state, 'p1', 0, 1000).state;
