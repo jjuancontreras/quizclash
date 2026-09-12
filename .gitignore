@@ -19,3 +19,6 @@ dist/
 coverage/
 playwright-report/
 test-results/
+
+# Isolated worktrees
+.worktrees/
