@@ -160,6 +160,27 @@ function isRoundRunning(phase: GamePhase): boolean {
 }
 
 /**
+ * The lobby's promotion rule, in one place: the longest-seated player who is
+ * actually still in the room. A seat merely held open by a disconnected
+ * player can never carry the host role, because only the host can advance the
+ * lobby.
+ */
+function promoteHostId(players: readonly Player[]): string | null {
+  return (
+    players
+      .filter((p) => p.connected)
+      .slice()
+      .sort((a, b) => a.joinedAtMs - b.joinedAtMs)[0]?.id ?? null
+  );
+}
+
+/** True once every player still in the room has an answer on the board. */
+function everyConnectedPlayerAnswered(state: GameState): boolean {
+  const present = state.players.filter((p) => p.connected);
+  return present.length > 0 && present.every((p) => state.answers.some((a) => a.playerId === p.id));
+}
+
+/**
  * Mid-game (once a round is running) the seat and score are KEPT and the
  * player is only marked disconnected — three players must not be held
  * hostage by one person's wifi, and that person must be able to rejoin.
@@ -181,10 +202,16 @@ function handleLeave(
     );
     const next: GameState = { ...state, players };
     const allGone = players.every((p) => !p.connected);
+    if (allGone) return result(next, { effect: { type: 'CLEANUP' } });
 
-    return allGone
-      ? result(next, { effect: { type: 'CLEANUP' } })
-      : result(next, { alarmAtMs: state.phaseEndsAtMs });
+    // The departing player may have been the last one the round was waiting
+    // on. Without re-checking here the question runs its full window for
+    // nobody — and if cleanup has since deleted the alarm, forever.
+    if (state.phase === 'QUESTION' && everyConnectedPlayerAnswered(next)) {
+      return enterReveal(next, nowMs);
+    }
+
+    return result(next, { alarmAtMs: state.phaseEndsAtMs });
   }
 
   const remaining = state.players.filter((p) => p.id !== event.playerId);
@@ -200,21 +227,37 @@ function handleLeave(
     : result(next, { alarmAtMs: state.phaseEndsAtMs ?? nowMs + IDLE_CLEANUP_MS });
 }
 
+/**
+ * Re-arms the phase deadline rather than returning `null` ("leave the alarm
+ * alone"). If everyone had dropped, the adapter already ran CLEANUP and
+ * deleted the alarm, so leaving it alone strands the returning player in a
+ * phase nothing can end. A deadline already in the past makes `setAlarm` fire
+ * immediately, which is the correct recovery.
+ */
 function handleReconnect(state: GameState, playerId: string): EngineResult {
   if (!state.players.some((p) => p.id === playerId)) return result(state);
 
   const players = state.players.map((p) => (p.id === playerId ? { ...p, connected: true } : p));
-  return result({ ...state, players });
+  return result({ ...state, players }, { alarmAtMs: state.phaseEndsAtMs });
 }
 
+/**
+ * Seats held by disconnected players are pruned here and nowhere else. Their
+ * PLAYER_LEAVE has already fired and no LOBBY event unseats them, so a ghost
+ * that survives PLAY_AGAIN fills the room permanently and the next friend is
+ * told the lobby is full.
+ */
 function handlePlayAgain(state: GameState, playerId: string): EngineResult {
   if (playerId !== state.hostId) return rejected(state, 'NOT_HOST');
   if (state.phase !== 'PODIUM') return rejected(state, 'BAD_PHASE');
 
+  const players = state.players.filter((p) => p.connected).map((p) => ({ ...p, score: 0 }));
+
   const next: GameState = {
     ...state,
     phase: 'LOBBY',
-    players: state.players.map((p) => ({ ...p, score: 0 })),
+    players,
+    hostId: players.some((p) => p.id === state.hostId) ? state.hostId : promoteHostId(players),
     questions: [],
     questionIndex: 0,
     questionShownAtMs: null,
@@ -299,8 +342,24 @@ function enterReveal(state: GameState, nowMs: number): EngineResult {
   return result(next, { alarmAtMs: nowMs + REVEAL_MS });
 }
 
+/**
+ * The podium is where the lobby needs a host again: both PLAY_AGAIN and
+ * OPEN_SETUP are host-only. Mid-round the host's seat is deliberately
+ * preserved even while they are gone (spec §6, "the game continues
+ * uninterrupted"), so this is the first moment it is safe to re-evaluate —
+ * otherwise a host whose wifi blipped leaves everyone else with no way to
+ * start another game.
+ */
 function enterPodium(state: GameState): EngineResult {
-  return result({ ...state, phase: 'PODIUM', phaseEndsAtMs: null, questionShownAtMs: null });
+  const hostIsPresent = state.players.some((p) => p.id === state.hostId && p.connected);
+
+  return result({
+    ...state,
+    phase: 'PODIUM',
+    hostId: hostIsPresent ? state.hostId : promoteHostId(state.players),
+    phaseEndsAtMs: null,
+    questionShownAtMs: null,
+  });
 }
 
 function handleSubmitAnswer(
@@ -340,7 +399,7 @@ function handleSubmitAnswer(
   const expected = next.players.filter((p) => p.connected).length;
   return next.answers.length >= expected
     ? enterReveal(next, nowMs)
-    : result(next, { alarmAtMs: state.phaseEndsAtMs });
+    : result(next, { alarmAtMs: next.phaseEndsAtMs });
 }
 
 function handleRoundTimeout(state: GameState, nowMs: number): EngineResult {
