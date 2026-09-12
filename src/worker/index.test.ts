@@ -1,6 +1,7 @@
-import { SELF } from 'cloudflare:test';
+import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { describe, expect, test } from 'vitest';
 import { isValidLobbyCode } from '../engine/lobbyCode.js';
+import type { GameRoom } from './GameRoom.js';
 
 describe('POST /api/lobby', () => {
   test('mints a valid lobby code', async () => {
@@ -34,6 +35,23 @@ describe('GET /ws', () => {
     });
 
     expect(response.status).toBe(101);
+  });
+
+  test('forwards the normalized (uppercase) code to the Durable Object, not the raw input', async () => {
+    const response = await SELF.fetch('https://example.com/ws?code=qrst&playerId=p1&name=Juan&seed=s', {
+      headers: { Upgrade: 'websocket' },
+    });
+    expect(response.status).toBe(101);
+
+    // The router addressed the object by the normalized code, so that is the
+    // id we must look it up by too -- idFromName('qrst') would be a
+    // different object entirely.
+    const id = env.GAME_ROOM.idFromName('QRST');
+    const stub = env.GAME_ROOM.get(id) as DurableObjectStub<GameRoom>;
+
+    await runInDurableObject(stub, (instance: GameRoom) => {
+      expect(instance.debugState().lobbyCode).toBe('QRST');
+    });
   });
 
   test('requires a websocket upgrade header', async () => {
