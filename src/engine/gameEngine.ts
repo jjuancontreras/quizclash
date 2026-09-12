@@ -144,7 +144,7 @@ function handleJoin(
     hostId: state.hostId ?? event.playerId,
   };
 
-  return result(next, { alarmAtMs: nowMs + IDLE_CLEANUP_MS });
+  return result(next, { alarmAtMs: state.phaseEndsAtMs ?? nowMs + IDLE_CLEANUP_MS });
 }
 
 /**

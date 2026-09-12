@@ -1,7 +1,7 @@
 {
   "name": "quizclash",
   "main": "src/worker/index.ts",
-  "compatibility_date": "2026-09-01",
+  "compatibility_date": "2026-08-22",
   "compatibility_flags": ["nodejs_compat"],
   "durable_objects": {
     "bindings": [{ "name": "GAME_ROOM", "class_name": "GameRoom" }]

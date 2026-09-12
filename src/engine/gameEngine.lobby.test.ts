@@ -83,6 +83,15 @@ describe('PLAYER_JOIN', () => {
     const { state } = reduce(createInitialState('ABCD'), join('p1'), 0);
     expect(state.players[0]?.score).toBe(0);
   });
+
+  test('keeps the live question deadline as the alarm instead of the idle timeout', () => {
+    const lobby = joinAll(createInitialState('ABCD'), ['p1', 'p2']);
+    const live: GameState = { ...lobby, phase: 'QUESTION', phaseEndsAtMs: 12_345 };
+
+    const result = reduce(live, join('p3'), 0);
+
+    expect(result.alarmAtMs).toBe(12_345);
+  });
 });
 
 describe('PLAYER_LEAVE in LOBBY', () => {
