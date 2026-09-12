@@ -32,6 +32,10 @@ describe('isQuestionWithinBudget', () => {
     expect(isQuestionWithinBudget(makeQuestion({ choices }))).toBe(false);
   });
 
+  test('rejects an explanation longer than the 150-char reveal-card budget', () => {
+    expect(isQuestionWithinBudget(makeQuestion({ explanation: 'e'.repeat(151) }))).toBe(false);
+  });
+
   test('rejects a question that does not have exactly four choices', () => {
     expect(isQuestionWithinBudget(makeQuestion({ choices: ['a', 'b', 'c'] }))).toBe(false);
   });

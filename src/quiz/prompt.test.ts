@@ -54,5 +54,6 @@ describe('buildQuizPrompt', () => {
     const prompt = buildQuizPrompt(config());
     expect(prompt).toContain('120');
     expect(prompt).toContain('60');
+    expect(prompt).toContain('150');
   });
 });

@@ -42,14 +42,22 @@ async function attempt(
   let raw: string;
   try {
     raw = await model.generate(source, config);
-  } catch {
+  } catch (error) {
+    // The player only ever sees GENERATION_FAILURE_MESSAGE, so an
+    // unresolvable model id, an expired key, an exhausted quota and an
+    // unreadable PDF are indistinguishable from outside. Keep the detail
+    // where the operator can reach it.
+    console.error('quiz generation attempt failed', error);
     return null;
   }
 
   const parsed = parseQuestions(raw);
   if (parsed === null) return null;
 
-  const prepared = prepareQuestions(parsed, random);
+  // The prompt asks for exactly `count` and the schema sets no upper bound,
+  // so nothing but this stops an over-generous model from handing four
+  // friends a 25-minute game. Spec section 8: the server-side layer enforces.
+  const prepared = prepareQuestions(parsed, random).slice(0, config.count);
   return prepared.length >= MIN_QUESTIONS ? prepared : null;
 }
 

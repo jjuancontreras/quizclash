@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { generateQuiz, GENERATION_FAILURE_MESSAGE } from './generator.js';
 import type { QuizModel, QuizSource } from './geminiClient.js';
 import type { SetupConfig } from '../shared/types.js';
@@ -28,6 +28,10 @@ function modelThrowing(...errors: Error[]): QuizModel {
   for (const e of errors) generate.mockRejectedValueOnce(e);
   return { generate } as unknown as QuizModel;
 }
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('generateQuiz', () => {
   test('returns prepared questions when the model responds well', async () => {
@@ -102,5 +106,34 @@ describe('generateQuiz', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe(GENERATION_FAILURE_MESSAGE);
+  });
+
+  /**
+   * The player sees one generic sentence whatever went wrong, so an
+   * unresolvable model id, an expired key, an exhausted quota and a genuinely
+   * unreadable PDF are indistinguishable from the outside. The operator has
+   * to be able to tell them apart.
+   */
+  test('logs the model error server-side instead of swallowing it', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const failure = new Error('model not found: gemini-flash-latest');
+
+    await generateQuiz(modelThrowing(failure, failure), source, config, () => 0.5);
+
+    expect(logged).toHaveBeenCalledTimes(2);
+    expect(logged.mock.calls[0]?.[1]).toBe(failure);
+  });
+
+  /**
+   * The prompt asks for exactly config.count questions and the schema puts no
+   * upper bound on the array. A model that returns 40 would otherwise hand
+   * four friends a 25-minute game. Spec section 8: the server-side layer is
+   * the one that enforces.
+   */
+  test('caps the round at the requested question count', async () => {
+    const result = await generateQuiz(modelReturning(validPayload(40)), source, config, () => 0.5);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.questions).toHaveLength(config.count);
   });
 });
