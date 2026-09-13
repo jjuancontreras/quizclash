@@ -278,4 +278,52 @@ describe('GameRoom', () => {
       expect(instance.debugState().phase).toBe('QUESTION');
     });
   });
+
+  /**
+   * debugState() is a test seam that must never expose reconnectToken.
+   * Even though it returns GameState (not PublicState), the token is a
+   * server secret that belongs only on secure channels — testing must be
+   * able to read other fields like phase, hostId, and player ids without
+   * accidentally leaking the actual token value.
+   */
+  test('strips reconnectToken from players in debugState', async () => {
+    const stub = room('DBTK');
+    const response = await stub.fetch('https://do/ws?code=DBTK&name=TestPlayer&seed=s1&playerId=p1', {
+      headers: { Upgrade: 'websocket' },
+    });
+    const client = response.webSocket;
+    if (client === null) throw new Error('expected a websocket in the response');
+    client.accept();
+
+    // Capture the real token sent in the IDENTITY message so we can verify
+    // debugState() does NOT return this value
+    const realToken = await new Promise<string>((resolve) => {
+      client.addEventListener('message', (event) => {
+        const message = JSON.parse(String(event.data)) as { type: string; reconnectToken?: string };
+        if (message.type === 'IDENTITY' && message.reconnectToken) {
+          resolve(message.reconnectToken);
+        }
+      });
+    });
+
+    await runInDurableObject(stub, (instance: GameRoom) => {
+      const debugged = instance.debugState();
+
+      // debugState must return a GameState, so players are still Player[], not PublicPlayer[]
+      expect(debugged.players).toHaveLength(1);
+
+      const player = debugged.players[0];
+      expect(player).toBeDefined();
+
+      // Other fields must be intact
+      expect(player?.id).toBe('p1');
+      expect(player?.name).toBe('TestPlayer');
+      expect(player?.connected).toBe(true);
+
+      // The critical check: reconnectToken must NOT be the real value
+      expect(player?.reconnectToken).not.toBe(realToken);
+      // And it should be empty (the obfuscation strategy)
+      expect(player?.reconnectToken).toBe('');
+    });
+  });
 });

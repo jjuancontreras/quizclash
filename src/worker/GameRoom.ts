@@ -38,9 +38,16 @@ export class GameRoom extends DurableObject<Env> {
    * Read-only test seam. Not called in production paths, and deliberately not
    * paired with a setter: a whole-state overwrite is reachable over RPC by
    * anyone holding a typed stub to this object.
+   *
+   * The reconnectToken is server-secret and never exposed via this method,
+   * even though it returns GameState rather than PublicState. Tests may read
+   * other fields like phase, hostId, and player ids freely.
    */
   debugState(): GameState {
-    return this.state;
+    return {
+      ...this.state,
+      players: this.state.players.map(({ reconnectToken, ...rest }) => ({ ...rest, reconnectToken: '' })),
+    };
   }
 
   async fetch(request: Request): Promise<Response> {
