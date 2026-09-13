@@ -45,13 +45,19 @@ describe('GameRoom', () => {
     if (client === null) throw new Error('expected a websocket in the response');
     client.accept();
 
-    const first = await new Promise<MessageEvent>((resolve) => {
-      client.addEventListener('message', (event) => resolve(event), { once: true });
+    // A fresh join now also receives a one-off IDENTITY message ahead of the
+    // STATE snapshot (Task: reconnect token). It arrives first; STATE follows.
+    const messages: { type: string; state?: { players: { id: string }[] } }[] = [];
+    await new Promise<void>((resolve) => {
+      client.addEventListener('message', (event) => {
+        messages.push(JSON.parse(String(event.data)));
+        if (messages.length === 2) resolve();
+      });
     });
 
-    const message = JSON.parse(String(first.data)) as { type: string; state: { players: { id: string }[] } };
-    expect(message.type).toBe('STATE');
-    expect(message.state.players.map((p) => p.id)).toEqual(['p1']);
+    expect(messages[0]?.type).toBe('IDENTITY');
+    const stateMessage = messages.find((m) => m.type === 'STATE');
+    expect(stateMessage?.state?.players.map((p) => p.id)).toEqual(['p1']);
   });
 
   test('holds engine state across separate requests to the same object', async () => {
@@ -108,6 +114,117 @@ describe('GameRoom', () => {
 
       expect(instance.debugState().players.map((p) => p.id)).toEqual(['p2']);
       expect(instance.debugState().hostId).toBe('p2');
+    });
+  });
+
+  /**
+   * The reconnect token is what stops one player in a lobby from reading a
+   * rival's id off their own STATE frame and hijacking that seat on a second
+   * socket. It must reach its owner, and only its owner, on a fresh join.
+   */
+  test('sends the fresh joiner an IDENTITY message carrying a non-empty reconnect token', async () => {
+    const stub = room('IDEN');
+    const response = await stub.fetch('https://do/ws?code=IDEN&name=Juan&seed=s1&playerId=p1', {
+      headers: { Upgrade: 'websocket' },
+    });
+
+    const client = response.webSocket;
+    if (client === null) throw new Error('expected a websocket in the response');
+    client.accept();
+
+    const messages: { type: string; playerId?: string; reconnectToken?: string }[] = [];
+    await new Promise<void>((resolve) => {
+      client.addEventListener('message', (event) => {
+        messages.push(JSON.parse(String(event.data)));
+        if (messages.length === 2) resolve();
+      });
+    });
+
+    const identity = messages.find((m) => m.type === 'IDENTITY');
+    expect(identity).toBeDefined();
+    expect(identity?.playerId).toBe('p1');
+    expect(identity?.reconnectToken).toEqual(expect.any(String));
+    expect(identity?.reconnectToken?.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * The property that actually matters: IDENTITY is unicast. A second
+   * player's socket must never see a frame naming the first player's id —
+   * that would just move the leak from STATE to a different message type.
+   */
+  test('never sends a second socket the IDENTITY meant for someone else', async () => {
+    const stub = room('UNIC');
+    const first = await stub.fetch('https://do/ws?code=UNIC&name=Juan&seed=s1&playerId=p1', {
+      headers: { Upgrade: 'websocket' },
+    });
+    const firstClient = first.webSocket;
+    if (firstClient === null) throw new Error('expected a websocket in the response');
+    firstClient.accept();
+
+    const second = await stub.fetch('https://do/ws?code=UNIC&name=Ana&seed=s2&playerId=p2', {
+      headers: { Upgrade: 'websocket' },
+    });
+    const secondClient = second.webSocket;
+    if (secondClient === null) throw new Error('expected a websocket in the response');
+    secondClient.accept();
+
+    const secondMessages: { type: string; playerId?: string }[] = [];
+    await new Promise<void>((resolve) => {
+      secondClient.addEventListener('message', (event) => {
+        secondMessages.push(JSON.parse(String(event.data)));
+        if (secondMessages.length === 2) resolve();
+      });
+    });
+
+    const leakedIdentity = secondMessages.find((m) => m.type === 'IDENTITY' && m.playerId === 'p1');
+    expect(leakedIdentity).toBeUndefined();
+  });
+
+  test('accepts a reconnect whose token matches the one issued on join', async () => {
+    const stub = room('RECN');
+    const joined = await stub.fetch('https://do/ws?code=RECN&name=Juan&seed=s1&playerId=p1', {
+      headers: { Upgrade: 'websocket' },
+    });
+    const joinClient = joined.webSocket;
+    if (joinClient === null) throw new Error('expected a websocket in the response');
+    joinClient.accept();
+
+    const identity = await new Promise<{ type: string; reconnectToken: string }>((resolve) => {
+      joinClient.addEventListener('message', (event) => {
+        const message = JSON.parse(String(event.data)) as { type: string; reconnectToken: string };
+        if (message.type === 'IDENTITY') resolve(message);
+      });
+    });
+
+    const reconnect = await stub.fetch(
+      `https://do/ws?code=RECN&playerId=p1&token=${identity.reconnectToken}`,
+      { headers: { Upgrade: 'websocket' } },
+    );
+
+    expect(reconnect.status).toBe(101);
+    expect(reconnect.webSocket).not.toBeNull();
+  });
+
+  test('refuses a reconnect with a missing or wrong token with 401, never accepting the socket', async () => {
+    const stub = room('BADT');
+    await stub.fetch('https://do/ws?code=BADT&name=Juan&seed=s1&playerId=p1', {
+      headers: { Upgrade: 'websocket' },
+    });
+
+    const wrongToken = await stub.fetch('https://do/ws?code=BADT&playerId=p1&token=not-the-real-token', {
+      headers: { Upgrade: 'websocket' },
+    });
+    expect(wrongToken.status).toBe(401);
+    expect(wrongToken.webSocket).toBeNull();
+
+    const missingToken = await stub.fetch('https://do/ws?code=BADT&playerId=p1', {
+      headers: { Upgrade: 'websocket' },
+    });
+    expect(missingToken.status).toBe(401);
+    expect(missingToken.webSocket).toBeNull();
+
+    await runInDurableObject(stub, (instance: GameRoom) => {
+      expect(instance.debugState().players).toHaveLength(1);
     });
   });
 

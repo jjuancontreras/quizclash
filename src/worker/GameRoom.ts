@@ -19,6 +19,17 @@ interface SocketMeta {
 const ALARM_SCHEDULING_FAILURE_MESSAGE =
   'Lost the game clock. Refresh the page to reconnect.';
 
+/**
+ * Maps a REJECTED broadcast to the HTTP response `fetch` sends before ever
+ * accepting a socket. `LOBBY_FULL` keeps its established 409; a bad reconnect
+ * token is a distinct failure mode and gets 401, never 409.
+ */
+function rejectionResponse(reason: 'LOBBY_FULL' | 'NOT_HOST' | 'BAD_PHASE' | 'BAD_TOKEN' | undefined): Response | null {
+  if (reason === 'LOBBY_FULL') return new Response('Lobby is full', { status: 409 });
+  if (reason === 'BAD_TOKEN') return new Response('Invalid reconnect token', { status: 401 });
+  return null;
+}
+
 export class GameRoom extends DurableObject<Env> {
   private state: GameState = createInitialState('');
   private pendingSource: QuizSource | null = null;
@@ -39,27 +50,47 @@ export class GameRoom extends DurableObject<Env> {
 
     const url = new URL(request.url);
     const playerId = url.searchParams.get('playerId') ?? crypto.randomUUID();
+    const token = url.searchParams.get('token') ?? '';
     const code = url.searchParams.get('code') ?? '';
     if (this.state.lobbyCode === '') this.state = { ...this.state, lobbyCode: code };
 
+    // A fresh join is issued a brand-new secret here; the URL's `token` (if
+    // any) is irrelevant to it. A reconnect never mints a new secret — it
+    // must present the one the join already handed out, so it is passed
+    // through unmodified for the engine to check.
     const isKnown = this.state.players.some((p) => p.id === playerId);
+    const reconnectToken = isKnown ? token : crypto.randomUUID();
     const event: EngineEvent = isKnown
-      ? { type: 'PLAYER_RECONNECT', playerId }
+      ? { type: 'PLAYER_RECONNECT', playerId, reconnectToken }
       : {
           type: 'PLAYER_JOIN',
           playerId,
           name: url.searchParams.get('name') ?? 'Player',
           avatarSeed: url.searchParams.get('seed') ?? 'default',
+          reconnectToken,
         };
 
+    // Checked, and turned into a response, before the socket is ever
+    // created — a failed reconnect attempt must not seat an attacker's
+    // connection at all.
     const outcome = this.apply(event);
-    const wasRejected = outcome.broadcasts.some((m) => m.type === 'REJECTED');
-    if (wasRejected) return new Response('Lobby is full', { status: 409 });
+    const rejection = outcome.broadcasts.find((m) => m.type === 'REJECTED');
+    const rejectedResponse = rejectionResponse(rejection?.reason);
+    if (rejectedResponse !== null) return rejectedResponse;
 
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment({ playerId } satisfies SocketMeta);
+
+    // The token is this socket's proof of identity for every future
+    // reconnect. It is sent once, directly on this socket, and never
+    // broadcast — a reconnecting client already holds it and must not be
+    // sent it again.
+    if (!isKnown) {
+      const identityMessage: ServerMessage = { type: 'IDENTITY', playerId, reconnectToken };
+      server.send(JSON.stringify(identityMessage));
+    }
 
     // The join was broadcast to the sockets that existed at that moment, which
     // does not include this one — it didn't exist yet. Without this, a
