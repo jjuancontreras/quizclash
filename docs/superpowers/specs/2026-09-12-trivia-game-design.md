@@ -1,9 +1,9 @@
 # QuizClash — Design Spec
 
-**Date:** 2026-09-12
+**Date:** 2026-09-12 (updated 2026-09-13)
 **Domain:** Personal
-**Status:** Approved (brainstorming complete)
-**Next step:** `superpowers:writing-plans`
+**Status:** Plan A shipped and merged (engine + Durable Object, including the reconnect-token hardening in §6). Plan B (client) next.
+**Outcomes record:** `docs/superpowers/plan-a-outcomes.md` — decisions corrected during Plan A's execution, what shipped beyond this document's original text, and what Plan B must pick up. This spec has been updated in place to match; the outcomes doc is the narrative of *why*.
 
 ---
 
@@ -34,6 +34,7 @@ Inherited from `~/.claude/rules/common/`:
 | 8 | **React + Vite on Vercel; Durable Object per lobby on Cloudflare** | Vercel cannot broadcast between function instances, so it cannot host the game itself. See §4. |
 | 9 | **Neobrutalism visual direction** | Sourced library, not generated. See §9. |
 | 10 | **Injected clock** | Required for deterministic tests of a 20s question window. Must be designed in from the first commit. |
+| 11 | **Reconnect requires a server-minted secret, not just the player id** | Added during Plan A after the original guest-identity design (#1) turned out to leave every player's id broadcast to the whole lobby, letting anyone reconnect as anyone. See §6. |
 
 ## 4. Hosting Architecture
 
@@ -67,17 +68,19 @@ Durable Object **storage** began billing in January 2026 — not incurred here, 
 
 ## 5. Module Decomposition
 
-| # | Module | Responsibility | Depends on |
-|---|---|---|---|
-| 1 | `shared/` | TypeScript types: `Question`, `Player`, `GamePhase`, and a discriminated union of every wire message. Imported by both client and Worker so a mistyped event is a compile error. | — |
-| 2 | Quiz Generator | `{ source, count, difficulty, topics }` → `Question[]`. Owns the Gemini prompt, JSON schema, and output validation. Knows nothing about games or sockets. | 1 |
-| 3 | Scoring | Pure: `(answeredAtMs, shownAtMs, windowMs, isCorrect)` → points. Isolated despite being tiny because it is the mechanic the whole game rests on. | 1 |
-| 4 | Game Room (Durable Object) | The authoritative state machine. Holds players, questions, scores, clock. Every phase transition happens here and nowhere else. | 1, 2, 3 |
-| 5 | Lobby Codes | Generate and validate 4-character codes; map code to Durable Object id. Excludes ambiguous characters (no `0`/`O`, no `1`/`I`) because codes are read aloud and typed on phones. | — |
-| 6 | Realtime Client | Browser socket wrapper: connect, auto-reconnect with backoff, typed dispatch. React components never see a raw WebSocket. | 1 |
-| 7 | UI Screens | Identity, Lobby, Setup, Countdown, Question, Reveal, Podium. | 1, 6 |
+| # | Module | Responsibility | Depends on | Status |
+|---|---|---|---|---|
+| 1 | `shared/` | TypeScript types: `Question`, `Player`, `GamePhase`, and a discriminated union of every wire message. Imported by both client and Worker so a mistyped event is a compile error. | — | **Shipped (Plan A)** |
+| 2 | Quiz Generator | `{ source, count, difficulty, topics }` → `Question[]`. Owns the Gemini prompt, JSON schema, and output validation. Knows nothing about games or sockets. | 1 | **Shipped** |
+| 3 | Scoring | Pure: `(answeredAtMs, shownAtMs, windowMs, isCorrect)` → points. Isolated despite being tiny because it is the mechanic the whole game rests on. | 1 | **Shipped** |
+| 4 | Game Room (Durable Object) | The authoritative state machine. Holds players, questions, scores, clock. Every phase transition happens here and nowhere else. | 1, 2, 3 | **Shipped**, hardened post-merge with the reconnect-token check (§6) |
+| 5 | Lobby Codes | Generate and validate 4-character codes; map code to Durable Object id. Excludes ambiguous characters (no `0`/`O`, no `1`/`I`) because codes are read aloud and typed on phones. | — | **Shipped** |
+| 6 | Realtime Client | Browser socket wrapper: connect, auto-reconnect with backoff, typed dispatch. React components never see a raw WebSocket. Must capture the `IDENTITY` message (§6) on first join and carry the token on every reconnect. | 1 | **Plan B** |
+| 7 | UI Screens | Identity, Lobby, Setup, Countdown, Question, Reveal, Podium. | 1, 6 | **Plan B** |
 
 **The invariant that keeps this honest:** the client renders state and sends intent. It never computes a score, decides when a question ends, or advances a phase. All of that lives in module 4.
+
+Modules 1–5 shipped as **Plan A**: a fully tested, headless engine and Durable Object with no UI — verified end to end via `wrangler dev` against a live Gemini key. Modules 6–7 are **Plan B**, starting from this spec plus two engine additions the final Plan A review found necessary before any client can be built correctly (both below): `PublicState` needs `answered`/`deltas` fields, and every `REJECTED`/`ERROR` message needs to reach only its intended recipient rather than the whole lobby.
 
 ## 6. Game State Machine
 
@@ -96,9 +99,10 @@ Durable Object **storage** began billing in January 2026 — not incurred here, 
 ### Rules that close ambiguities in the above
 
 - **The host plays.** They occupy one of the four seats and are scored like anyone else. This is why the rejected host-preview idea in §8 breaks the game rather than merely bending it.
-- **"Play again" returns the lobby to `LOBBY` with scores reset and the same players seated.** It does *not* replay the same questions — a fresh `SETUP` and generation is required, because replaying a known answer key is not a game. Reusing the previous quiz is part of the deferred quiz-library feature (§11).
+- **"Play again" returns the lobby to `LOBBY` with scores reset and the same players seated** — except players who disconnected before the podium, whose seats are pruned so a replacement can join without the lobby reading as full. If the departed player was host, the longest-connected remaining player is promoted, matching the `LOBBY` promotion rule below. It does *not* replay the same questions — a fresh `SETUP` and generation is required, because replaying a known answer key is not a game. Reusing the previous quiz is part of the deferred quiz-library feature (§11).
 - **A fifth player attempting to join is rejected** with "This lobby is full" and returned to the join screen. The lobby cap is enforced in the Durable Object, not the UI.
-- **Duplicate display names inside one lobby are disambiguated with a numeric suffix** (`Juan`, `Juan (2)`). Names are trimmed, capped at 16 characters, and stripped of control characters on arrival — the display name is untrusted input rendered on three other people's screens.
+- **A late join into a seat freed earlier in the same lobby is allowed at any phase**, including mid-round — there is no cap on when a player may join, only on how many are seated at once. They start at zero score; any question they missed before joining stays unanswered for them, scored 0 like a timeout. This is a deliberate recovery path, not a gap: it is how a lobby stays playable after someone leaves mid-`LOBBY` and a replacement shows up once the round is already moving.
+- **Duplicate display names inside one lobby are disambiguated with a numeric suffix** (`Juan`, `Juan (2)`). Names are trimmed, capped at 16 characters, and stripped of control characters on arrival — the display name is untrusted input rendered on three other people's screens. The DiceBear avatar seed gets the identical treatment: stripped to `[A-Za-z0-9_-]`, capped at 32 characters, falling back to a default seed when nothing usable remains. It is exactly the same class of input — attacker-controlled, rendered on three other screens for the life of the lobby — and earns the same boundary discipline.
 
 ### Scoring
 
@@ -120,13 +124,27 @@ Instant correct ≈ 1000; buzzer-beater correct ≈ 500; wrong or no answer 0. W
 
 | Event | Behaviour | Why |
 |---|---|---|
-| Player drops in `LOBBY` | Seat freed, avatar bubbles out | Nothing to preserve |
-| Player drops mid-game | Seat and score kept; game continues; missed questions score 0; may rejoin and resume | Three players must not be held hostage by one person's wifi |
-| Host drops in `LOBBY` | Longest-connected remaining player promoted to host | A wifi blip must not destroy the lobby |
-| Host drops mid-game | Game continues uninterrupted | The clock lives in the Durable Object, not the host's browser |
+| Player drops in `LOBBY`, `SETUP`, or `GENERATING` | Seat freed, avatar bubbles out; host reassigned if it was them | Nothing worth preserving yet — no questions exist and every score is still zero, while an absent host actively blocks the lobby (only the host can open or submit setup). These three phases are treated identically: a round has not started. |
+| Player drops in `COUNTDOWN`, `QUESTION`, or `REVEAL` | Seat and score kept; game continues; missed questions score 0; may rejoin and resume | Three players must not be held hostage by one person's wifi, and there is now a score worth preserving |
+| Host drops in `LOBBY`, `SETUP`, or `GENERATING` | Longest-connected remaining player promoted to host | A wifi blip must not destroy the lobby, and — specifically for `SETUP`/`GENERATING` — the game cannot otherwise be started or retried at all, since both actions are host-gated |
+| Host drops during `COUNTDOWN`/`QUESTION`/`REVEAL` | Game continues uninterrupted, host seat and identity unchanged | The clock lives in the Durable Object, not the host's browser |
+| Host absent at `PODIUM` | Longest-connected remaining player promoted to host | Otherwise "Play again" and re-`OPEN_SETUP` are both host-gated and the room can never restart |
 | All players drop | 10-minute alarm, then self-cleanup | Prevents abandoned lobbies leaking memory |
 
-**Reconnect:** the client stores `{ lobbyCode, playerId }` in `sessionStorage`. On reconnect it sends both; the object re-attaches the player to their existing seat and pushes a **full state snapshot** — the same shape used for a fresh join, so there is one code path, not two.
+**Reconnecting requires proof, not just the id.** Every player id is visible to every other player in the lobby (§6's `STATE` broadcasts include the full seated list) — an id was never meant to double as a credential. A player is authenticated for reconnect by a **`reconnectToken`**: a random secret the server mints once, at first join, and reveals to nobody but its owner.
+
+- On a fresh join, the server's first message on that socket — before the usual `STATE` snapshot — is a one-off `IDENTITY` frame: `{ playerId, reconnectToken }`. It is sent once, to that socket only, and never appears in any broadcast or in any later message to anyone.
+- The client stores `{ lobbyCode, playerId, reconnectToken }` in `sessionStorage`.
+- To reconnect, the client sends all three. The server checks the token against what it minted for that `playerId`; only on a match does it restore the seat and push the full state snapshot (the same shape used for a fresh join, so there is still one code path, not two). A mismatch is refused **before the WebSocket connection is even accepted** — the client's connection attempt itself fails, so the UI needs an explicit "couldn't reconnect" state, distinct from "still connecting."
+- Losing the token (a cleared `sessionStorage`, a different device) means the seat cannot be reclaimed — the player rejoins as someone new. Accepted: there are no accounts and nothing persists past the match, so this matches the rest of the guest-identity model rather than being a new limitation.
+
+### Two engine gaps Plan B must close before any screen work
+
+Found by Plan A's final whole-branch review, executing the reducer against adversarial scenarios rather than reading it. Both are engine changes with engine tests — not client workarounds, and not optional polish, because the two screens they block (`REVEAL` and the reject-message UI) cannot be built correctly without them.
+
+**1. Messages must reach only their intended recipient.** Today, the wire protocol has no notion of a reply — every `ERROR` and `REJECTED` message rides the same broadcast channel as `STATE`, so when one player taps a host-only control, **all four players see the rejection**, aimed at someone they can't identify. Fix: give the engine's result type a way to address a message to one player (a `replies` list alongside `broadcasts`, or a `to: playerId` tag on individual messages) and have the Durable Object route by the socket's own player id rather than fanning everything out. This has to land before Plan B's client reads a single `REJECTED` frame, or the client gets built assuming a message is always meant for the viewer.
+
+**2. `PublicState` needs `answered` and `deltas`.** The `REVEAL` row above promises "delta" and the `QUESTION → REVEAL` rule promises the round advances "as soon as all four have answered" — but nothing in the current wire state exposes either. A client cannot show "2 of 4 answered" during `QUESTION`, cannot show a per-question score delta on `REVEAL`, and a player who reconnects mid-round has no prior frame to diff against to recover either fact. Fix: `PublicState` gains `answered: readonly string[]` (player ids who have answered the live question) during `QUESTION`, and `deltas: readonly { playerId, points, choiceIndex }[]` during `REVEAL` — both pure projections of the engine's own `state.answers`, requiring no new state to be tracked.
 
 ## 7. Setup Wizard
 
@@ -161,11 +179,15 @@ Difficulty lives in the distractors, not the question stem.
   choices:      string[] // exactly 4, each <= 60 chars
   correctIndex: 0 | 1 | 2 | 3
   explanation:  string   // <= 150 chars, shown on REVEAL
-  sourceQuote:  string   // the span of material it was drawn from
+  sourceQuote:  string   // the span of material it was drawn from, <= 200 chars
 }
 ```
 
-**Three layers of unequal strength.** The JSON schema *guarantees* shape — four choices, a valid index, no missing fields. The prompt *requests* length limits. Only server-side validation *enforces* them. Code must treat every length limit as untrusted until checked.
+`sourceQuote` gets the same cap treatment as everything else it's shown alongside on the `REVEAL` screen — 200 characters, chosen to comfortably hold a sentence or two on a phone without the card growing taller than the explanation above it. Like the other four fields, this is enforced server-side, not merely requested in the prompt.
+
+**The generated set is also capped to exactly what was asked for.** The schema and prompt both aim at `config.count`, but neither *guarantees* it — a model can return more. Server-side validation slices the prepared set down to `config.count` after the existing filter/dedupe/shuffle pipeline, so a host who asked for 10 questions can never get a 25-minute game because the model got generous.
+
+**Three layers of unequal strength.** The JSON schema *guarantees* shape — four choices, a valid index, no missing fields. The prompt *requests* length limits and the question count. Only server-side validation *enforces* either. Code must treat every length limit and every count as untrusted until checked.
 
 **Why 120 and 60:** on a 375px phone at readable size, 120 characters is roughly four lines of question text, and a 2×2 grid cell holds about 60 before it scrolls. The mobile-first requirement is therefore a **generation** constraint, not a CSS one.
 
