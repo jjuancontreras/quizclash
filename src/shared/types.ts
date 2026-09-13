@@ -119,11 +119,15 @@ export interface PublicState {
   readonly totalQuestions: number;
   readonly phaseEndsAtMs: number | null;
   readonly prompt: { readonly question: string; readonly choices: readonly string[] } | null;
+  /** Player ids who have answered the live question. Empty outside QUESTION. */
+  readonly answered: readonly string[];
   readonly reveal: {
     readonly correctIndex: number;
     readonly explanation: string;
     readonly sourceQuote: string;
   } | null;
+  /** Each seated player's outcome on the question just revealed. Empty outside REVEAL. */
+  readonly deltas: readonly { readonly playerId: string; readonly points: number; readonly choiceIndex: ChoiceIndex }[];
   readonly error: string | null;
 }
 

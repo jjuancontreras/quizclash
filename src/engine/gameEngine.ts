@@ -100,6 +100,7 @@ export function toPublicState(state: GameState): PublicState {
       (isLive || isReveal) && current !== undefined
         ? { question: current.question, choices: current.choices }
         : null,
+    answered: isLive ? state.answers.map((a) => a.playerId) : [],
     reveal:
       isReveal && current !== undefined
         ? {
@@ -108,6 +109,9 @@ export function toPublicState(state: GameState): PublicState {
             sourceQuote: current.sourceQuote,
           }
         : null,
+    deltas: isReveal
+      ? state.answers.map((a) => ({ playerId: a.playerId, points: a.points, choiceIndex: a.choiceIndex }))
+      : [],
     error: state.error,
   };
 }

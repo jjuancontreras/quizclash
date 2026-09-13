@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { createInitialState, reduce } from './gameEngine.js';
+import { createInitialState, reduce, toPublicState } from './gameEngine.js';
 import { QUESTION_WINDOW_MS, REVEAL_MS } from '../shared/constants.js';
 import type { ChoiceIndex, GameState, Question, SetupConfig } from '../shared/types.js';
 
@@ -209,5 +209,37 @@ describe('reveal expiry', () => {
     const result = reduce(state, { type: 'TIMEOUT' }, 1000 + REVEAL_MS);
 
     expect(result.state.players[0]?.score).toBe(1000);
+  });
+});
+
+describe('answered and deltas projections', () => {
+  test('answered lists player ids who have answered the live question, during QUESTION only', () => {
+    let state = atFirstQuestion(['p1', 'p2', 'p3']);
+    state = answer(state, 'p1', 0, 1000).state;
+
+    const publicState = toPublicState(state);
+    expect(publicState.answered).toEqual(['p1']);
+  });
+
+  test('answered is empty outside QUESTION', () => {
+    const state = atFirstQuestion(['p1', 'p2'], 1);
+    const publicState = toPublicState({ ...state, phase: 'LOBBY' });
+    expect(publicState.answered).toEqual([]);
+  });
+
+  test('deltas carries each answer\'s points and choice, during REVEAL only', () => {
+    let state = atFirstQuestion(['p1', 'p2'], 1);
+    state = answer(state, 'p1', 0, 1000).state;
+    const result = answer(state, 'p2', 1, 1200); // both have now answered -> REVEAL
+
+    expect(result.state.phase).toBe('REVEAL');
+    const publicState = toPublicState(result.state);
+    expect(publicState.deltas).toContainEqual({ playerId: 'p1', points: 1000, choiceIndex: 0 });
+    expect(publicState.deltas).toContainEqual({ playerId: 'p2', points: 0, choiceIndex: 1 });
+  });
+
+  test('deltas is empty outside REVEAL', () => {
+    const state = atFirstQuestion(['p1'], 1);
+    expect(toPublicState(state).deltas).toEqual([]);
   });
 });
