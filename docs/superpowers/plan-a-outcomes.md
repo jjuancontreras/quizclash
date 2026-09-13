@@ -12,11 +12,23 @@ This file is the durable record of decisions taken during execution. The SDD led
 | | |
 |---|---|
 | Tasks | 14 of 14 complete, each reviewed |
-| Tests | 200 passing across 15 files |
-| Coverage (instrumentable code) | 95.71% statements · 93.49% branches · 97.14% functions |
+| Tests | 208 passing across 15 files |
+| Coverage (instrumentable code) | ~95% statements · ~93% branches |
 | Typecheck | clean |
-| End-to-end | `wrangler dev --local` boots; `POST /api/lobby` returns a live code |
-| Commits | 30 |
+| End-to-end | `wrangler dev --local` boots; `POST /api/lobby` returns a live code, verified against a live Gemini key |
+| Commits | 35 |
+
+## Post-merge fix: player-identity spoofing closed (branch `reconnect-token`, merged 2026-09-13)
+
+The known limitation below — deferred to V2 at Plan A's original merge — was closed the same day, on request, rather than left open. Bounded task, its own worktree, TDD, code review + security review, both approved.
+
+**Design shipped:** `Player` gained `reconnectToken: string`, minted server-side with `crypto.randomUUID()` at first join. `PublicPlayer = Omit<Player, 'reconnectToken'>` and `toPublicState` strip it from every `STATE` broadcast — verified by asserting the *serialized* payload never contains the string, the same treatment `correctIndex` already gets. The token reaches its owner exactly once, via a new adapter-only `IDENTITY` message sent on that one socket, never broadcast. Reconnecting now requires `?playerId=X&token=Y` to match; a mismatch returns `REJECTED/'BAD_TOKEN'` and `GameRoom.fetch` refuses the WebSocket upgrade **before** `acceptWebSocket` is ever called — confirmed by both reviewers tracing the actual control flow, not just checking a status code.
+
+**One gap both reviewers found and the fix closed before merge:** `GameRoom.debugState()` — a pre-existing, production-unreachable test seam — returned the whole internal `GameState`, including every player's raw token. Nothing exploits it today (no RPC caller exists), but the security reviewer's own words were "I'd scope it down now rather than defer... that's exactly the kind of invariant that erodes silently over time." Fixed in one line, one commit, same day.
+
+**Reviewed and accepted as-is, not fixed:** `BAD_TOKEN` rejections still broadcast to the whole room rather than unicasting to the attempted reconnector — the pre-existing project-wide unicast-seam issue (see below). Traced and confirmed harmless specifically for this message: the `REJECTED` wire shape carries no `playerId`, so onlookers learn only that *some* reconnect failed, nothing identifying. `===` for the token comparison is not constant-time, but a 122-bit UUID over normal network jitter makes that a non-issue at this system's scale — explicitly not worth engineering effort.
+
+**Carried to Plan B, not fixed now:** the token travels as a URL query parameter (`?token=`) because browsers can't set custom headers on a WebSocket handshake — the only mechanism available. This means the secret will appear in Cloudflare edge logs if verbose logging is ever enabled, with no way to redact retroactively. Not a defect in this code; a constraint on future logging configuration the client/ops setup must respect.
 
 ## Decisions that changed the design during execution
 
@@ -54,15 +66,11 @@ A disconnected player's answer stays in `state.answers` while they drop out of t
 
 ## Known limitations carried into Plan B
 
-### Player identity is spoofable within a lobby — deferred to V2, deliberately
+### ~~Player identity is spoofable within a lobby~~ — CLOSED 2026-09-13, see above
 
-Player ids are broadcast verbatim to every player in each `STATE` frame, and `GameRoom.fetch` treats any URL-supplied `playerId` matching a seated player as a legitimate reconnect. **Any player can read another's id and open a second socket as them**, submitting answers or issuing host commands, with no signal to the victim.
+Was deferred to V2 at Plan A's merge; closed the same day on request via the `reconnect-token` branch (details above). **What Plan B must honour now is the wire contract this fix actually shipped, not the placeholder described below when this section was first written:**
 
-Accepted for V1: the spec deliberately chose guest identity with no accounts; the blast radius is one lobby among four people who already share the join code; nothing persists.
-
-**Two things Plan B must honour:**
-1. **Do not build the client assuming player ids are secret.**
-2. **Reserve the wire field now, even without enforcing it.** Spec §6 already commits the client to storing `{ lobbyCode, playerId }` and sending both on reconnect. Once that ships across two independently-deployed targets, adding a field is a breaking change. Mint a `reconnectSecret` at join, keep it server-side, never put it in `toPublicState`, return it only on the joining socket's first frame, and have the client store it. V1 may ignore it entirely; V2 becomes a one-line guard instead of a protocol migration.
+The client must store `{ lobbyCode, playerId, reconnectToken }` in `sessionStorage` (not just `{ lobbyCode, playerId }` as the spec's §6 currently states — **update the spec before Plan B starts**). On a fresh join, the server's first message on that socket is `{ type: 'IDENTITY', playerId, reconnectToken }`, sent before the `STATE` snapshot — the client must capture it there, since it is never sent again and never appears in any broadcast. On reconnect, the client sends `?playerId=X&token=Y`; a mismatch is refused before the WebSocket upgrade completes, so the client's error handling for a failed `new WebSocket(...)` needs to account for that case (e.g. a stale/cleared token after a long absence) rather than assuming reconnect always succeeds for a known id.
 
 ### `DEFAULT_GEMINI_MODEL` — verified 2026-09-13
 
