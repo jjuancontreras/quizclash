@@ -135,6 +135,8 @@ export type EngineEffect =
 export interface EngineResult {
   readonly state: GameState;
   readonly broadcasts: readonly ServerMessage[];
+  /** Messages addressed to exactly one player — never fanned out to the room. */
+  readonly replies: readonly { readonly to: string; readonly message: ServerMessage }[];
   readonly alarmAtMs: number | null;
   readonly effect: EngineEffect | null;
 }

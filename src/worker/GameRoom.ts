@@ -20,7 +20,7 @@ const ALARM_SCHEDULING_FAILURE_MESSAGE =
   'Lost the game clock. Refresh the page to reconnect.';
 
 /**
- * Maps a REJECTED broadcast to the HTTP response `fetch` sends before ever
+ * Maps a REJECTED reply to the HTTP response `fetch` sends before ever
  * accepting a socket. `LOBBY_FULL` keeps its established 409; a bad reconnect
  * token is a distinct failure mode and gets 401, never 409.
  */
@@ -81,8 +81,9 @@ export class GameRoom extends DurableObject<Env> {
     // created — a failed reconnect attempt must not seat an attacker's
     // connection at all.
     const outcome = this.apply(event);
-    const rejection = outcome.broadcasts.find((m) => m.type === 'REJECTED');
-    const rejectedResponse = rejectionResponse(rejection?.reason);
+    const rejection = outcome.replies.find((r) => r.message.type === 'REJECTED');
+    const reason = rejection?.message.type === 'REJECTED' ? rejection.message.reason : undefined;
+    const rejectedResponse = rejectionResponse(reason);
     if (rejectedResponse !== null) return rejectedResponse;
 
     const pair = new WebSocketPair();
@@ -163,6 +164,7 @@ export class GameRoom extends DurableObject<Env> {
     const outcome = reduce(this.state, event, this.now());
     this.state = outcome.state;
     this.broadcast(outcome.broadcasts);
+    this.deliverReplies(outcome.replies);
     if (outcome.alarmAtMs !== null) {
       // Not awaited — `apply` stays synchronous so `fetch` can still return
       // its 101 upgrade response promptly. The rejection is still handled:
@@ -174,6 +176,25 @@ export class GameRoom extends DurableObject<Env> {
       });
     }
     return outcome;
+  }
+
+  private deliverReplies(replies: EngineResult['replies']): void {
+    if (replies.length === 0) return;
+
+    for (const socket of this.ctx.getWebSockets()) {
+      const meta = socket.deserializeAttachment() as SocketMeta | null;
+      if (meta === null) continue;
+
+      for (const reply of replies) {
+        if (reply.to !== meta.playerId) continue;
+        try {
+          socket.send(JSON.stringify(reply.message));
+        } catch {
+          // Same reasoning as `broadcast`: a socket that died between
+          // getWebSockets() and send() is handled by webSocketClose.
+        }
+      }
+    }
   }
 
   private broadcast(messages: readonly ServerMessage[]): void {

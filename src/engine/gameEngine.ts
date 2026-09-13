@@ -120,6 +120,7 @@ function result(state: GameState, overrides: Partial<EngineResult> = {}): Engine
   return {
     state,
     broadcasts: broadcastState(state),
+    replies: [],
     alarmAtMs: null,
     effect: null,
     ...overrides,
@@ -128,9 +129,16 @@ function result(state: GameState, overrides: Partial<EngineResult> = {}): Engine
 
 function rejected(
   state: GameState,
+  playerId: string,
   reason: 'LOBBY_FULL' | 'NOT_HOST' | 'BAD_PHASE' | 'BAD_TOKEN',
 ): EngineResult {
-  return { state, broadcasts: [{ type: 'REJECTED', reason }], alarmAtMs: null, effect: null };
+  return {
+    state,
+    broadcasts: [],
+    replies: [{ to: playerId, message: { type: 'REJECTED', reason } }],
+    alarmAtMs: null,
+    effect: null,
+  };
 }
 
 function handleJoin(
@@ -138,7 +146,7 @@ function handleJoin(
   event: Extract<EngineEvent, { type: 'PLAYER_JOIN' }>,
   nowMs: number,
 ): EngineResult {
-  if (state.players.length >= MAX_PLAYERS) return rejected(state, 'LOBBY_FULL');
+  if (state.players.length >= MAX_PLAYERS) return rejected(state, event.playerId, 'LOBBY_FULL');
 
   const name = resolveNameCollision(
     sanitizeName(event.name),
@@ -257,7 +265,7 @@ function handleReconnect(
 ): EngineResult {
   const player = state.players.find((p) => p.id === event.playerId);
   if (player === undefined) return result(state);
-  if (player.reconnectToken !== event.reconnectToken) return rejected(state, 'BAD_TOKEN');
+  if (player.reconnectToken !== event.reconnectToken) return rejected(state, event.playerId, 'BAD_TOKEN');
 
   const players = state.players.map((p) =>
     p.id === event.playerId ? { ...p, connected: true } : p,
@@ -272,8 +280,8 @@ function handleReconnect(
  * told the lobby is full.
  */
 function handlePlayAgain(state: GameState, playerId: string): EngineResult {
-  if (playerId !== state.hostId) return rejected(state, 'NOT_HOST');
-  if (state.phase !== 'PODIUM') return rejected(state, 'BAD_PHASE');
+  if (playerId !== state.hostId) return rejected(state, playerId, 'NOT_HOST');
+  if (state.phase !== 'PODIUM') return rejected(state, playerId, 'BAD_PHASE');
 
   const players = state.players.filter((p) => p.connected).map((p) => ({ ...p, score: 0 }));
 
@@ -296,8 +304,8 @@ function handlePlayAgain(state: GameState, playerId: string): EngineResult {
 const GENERATION_TIMEOUT_MESSAGE = 'Question generation took too long. Try a smaller file.';
 
 function handleOpenSetup(state: GameState, playerId: string): EngineResult {
-  if (playerId !== state.hostId) return rejected(state, 'NOT_HOST');
-  if (state.phase !== 'LOBBY' && state.phase !== 'PODIUM') return rejected(state, 'BAD_PHASE');
+  if (playerId !== state.hostId) return rejected(state, playerId, 'NOT_HOST');
+  if (state.phase !== 'LOBBY' && state.phase !== 'PODIUM') return rejected(state, playerId, 'BAD_PHASE');
 
   return result({ ...state, phase: 'SETUP', error: null });
 }
@@ -307,8 +315,8 @@ function handleSubmitSetup(
   event: Extract<EngineEvent, { type: 'SUBMIT_SETUP' }>,
   nowMs: number,
 ): EngineResult {
-  if (event.playerId !== state.hostId) return rejected(state, 'NOT_HOST');
-  if (state.phase !== 'SETUP') return rejected(state, 'BAD_PHASE');
+  if (event.playerId !== state.hostId) return rejected(state, event.playerId, 'NOT_HOST');
+  if (state.phase !== 'SETUP') return rejected(state, event.playerId, 'BAD_PHASE');
 
   // A new attempt gets a new identity, which is what makes the previous
   // attempt's late result recognisably stale. `runEffect` has no abort, so an

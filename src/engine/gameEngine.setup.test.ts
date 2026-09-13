@@ -37,7 +37,10 @@ describe('OPEN_SETUP', () => {
     const result = reduce(lobbyWith(['p1', 'p2']), { type: 'OPEN_SETUP', playerId: 'p2' }, 100);
 
     expect(result.state.phase).toBe('LOBBY');
-    expect(result.broadcasts).toContainEqual({ type: 'REJECTED', reason: 'NOT_HOST' });
+    expect(result.replies).toContainEqual({
+      to: 'p2',
+      message: { type: 'REJECTED', reason: 'NOT_HOST' },
+    });
   });
 
   test('rejects a non-host in the wrong phase with NOT_HOST, not BAD_PHASE', () => {
@@ -49,8 +52,27 @@ describe('OPEN_SETUP', () => {
     const result = reduce(generating, { type: 'OPEN_SETUP', playerId: 'p2' }, 300);
 
     expect(result.state.phase).toBe('GENERATING');
-    expect(result.broadcasts).toContainEqual({ type: 'REJECTED', reason: 'NOT_HOST' });
-    expect(result.broadcasts).not.toContainEqual({ type: 'REJECTED', reason: 'BAD_PHASE' });
+    expect(result.replies).toContainEqual({
+      to: 'p2',
+      message: { type: 'REJECTED', reason: 'NOT_HOST' },
+    });
+    expect(result.replies).not.toContainEqual({
+      to: 'p2',
+      message: { type: 'REJECTED', reason: 'BAD_PHASE' },
+    });
+  });
+});
+
+describe('NOT_HOST replies are unicast', () => {
+  test('a non-host\'s OPEN_SETUP rejection is a reply addressed only to them', () => {
+    const state = lobbyWith(['p1', 'p2']);
+    const result = reduce(state, { type: 'OPEN_SETUP', playerId: 'p2' }, 100);
+
+    expect(result.broadcasts).toHaveLength(0);
+    expect(result.replies).toContainEqual({
+      to: 'p2',
+      message: { type: 'REJECTED', reason: 'NOT_HOST' },
+    });
   });
 });
 
@@ -75,12 +97,18 @@ describe('SUBMIT_SETUP', () => {
     const result = reduce(inSetup(), { type: 'SUBMIT_SETUP', playerId: 'p2', config }, 200);
 
     expect(result.state.phase).toBe('SETUP');
-    expect(result.broadcasts).toContainEqual({ type: 'REJECTED', reason: 'NOT_HOST' });
+    expect(result.replies).toContainEqual({
+      to: 'p2',
+      message: { type: 'REJECTED', reason: 'NOT_HOST' },
+    });
   });
 
   test('rejects setup submitted from the wrong phase', () => {
     const result = reduce(lobbyWith(['p1']), { type: 'SUBMIT_SETUP', playerId: 'p1', config }, 200);
-    expect(result.broadcasts).toContainEqual({ type: 'REJECTED', reason: 'BAD_PHASE' });
+    expect(result.replies).toContainEqual({
+      to: 'p1',
+      message: { type: 'REJECTED', reason: 'BAD_PHASE' },
+    });
   });
 
   test('rejects a non-host in the wrong phase with NOT_HOST, not BAD_PHASE', () => {
@@ -89,8 +117,14 @@ describe('SUBMIT_SETUP', () => {
     const result = reduce(lobbyWith(['p1', 'p2']), { type: 'SUBMIT_SETUP', playerId: 'p2', config }, 200);
 
     expect(result.state.phase).toBe('LOBBY');
-    expect(result.broadcasts).toContainEqual({ type: 'REJECTED', reason: 'NOT_HOST' });
-    expect(result.broadcasts).not.toContainEqual({ type: 'REJECTED', reason: 'BAD_PHASE' });
+    expect(result.replies).toContainEqual({
+      to: 'p2',
+      message: { type: 'REJECTED', reason: 'NOT_HOST' },
+    });
+    expect(result.replies).not.toContainEqual({
+      to: 'p2',
+      message: { type: 'REJECTED', reason: 'BAD_PHASE' },
+    });
   });
 });
 

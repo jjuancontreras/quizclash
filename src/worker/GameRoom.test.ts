@@ -19,6 +19,36 @@ function seedState(instance: GameRoom, next: GameState): void {
   (instance as unknown as { state: GameState }).state = next;
 }
 
+/** Connects a player's socket and accepts it client-side, matching the fetch/accept shape every test in this file already uses. */
+async function connectAndAccept(
+  stub: DurableObjectStub<GameRoom>,
+  code: string,
+  playerId: string,
+): Promise<WebSocket> {
+  const response = await stub.fetch(
+    `https://do/ws?code=${code}&name=${playerId}&seed=s&playerId=${playerId}`,
+    { headers: { Upgrade: 'websocket' } },
+  );
+  const socket = response.webSocket;
+  if (socket === null) throw new Error('expected a websocket in the response');
+  socket.accept();
+  return socket;
+}
+
+/** Resolves once `count` messages have arrived on `socket`, parsed from JSON. */
+function collectFrames(
+  socket: WebSocket,
+  count: number,
+): Promise<{ type: string; [key: string]: unknown }[]> {
+  return new Promise((resolve) => {
+    const frames: { type: string; [key: string]: unknown }[] = [];
+    socket.addEventListener('message', (event) => {
+      frames.push(JSON.parse(String(event.data)) as { type: string; [key: string]: unknown });
+      if (frames.length === count) resolve(frames);
+    });
+  });
+}
+
 describe('GameRoom', () => {
   test('upgrades a websocket request and seats the connecting player', async () => {
     const stub = room('ABCD');
@@ -325,5 +355,39 @@ describe('GameRoom', () => {
       // And it should be empty (the obfuscation strategy)
       expect(player?.reconnectToken).toBe('');
     });
+  });
+
+  /**
+   * The property that actually matters for REJECTED, mirroring the IDENTITY
+   * unicast test above: a rejection addressed to one player must never reach
+   * anyone else's socket, even though both are seated in the same room.
+   */
+  test('a NOT_HOST rejection reaches only the rejected player, never the other seated players', async () => {
+    const stub = room('NHST');
+    const hostSocket = await connectAndAccept(stub, 'NHST', 'p1');
+    await collectFrames(hostSocket, 2); // p1's own IDENTITY + STATE
+
+    // Registered before p2 joins: an already-accepted socket only queues
+    // messages for listeners attached ahead of the send, unlike a socket that
+    // has not yet been accepted (see connectAndAccept usage above).
+    const hostBroadcastFromJoin = collectFrames(hostSocket, 1); // the STATE broadcast from p2 joining
+    const otherSocket = await connectAndAccept(stub, 'NHST', 'p2');
+    await hostBroadcastFromJoin;
+    await collectFrames(otherSocket, 2); // p2's own IDENTITY + STATE
+
+    const leakedToHost: { type: string }[] = [];
+    hostSocket.addEventListener('message', (event) => {
+      leakedToHost.push(JSON.parse(String(event.data)) as { type: string });
+    });
+
+    const otherFramesPromise = collectFrames(otherSocket, 1);
+    otherSocket.send(JSON.stringify({ type: 'OPEN_SETUP' })); // p2 is not host
+
+    const otherFrames = await otherFramesPromise;
+    expect(otherFrames).toContainEqual({ type: 'REJECTED', reason: 'NOT_HOST' });
+
+    // Give any leaked broadcast a moment to arrive before asserting none did.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(leakedToHost.some((f) => f.type === 'REJECTED')).toBe(false);
   });
 });

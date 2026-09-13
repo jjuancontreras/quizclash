@@ -179,7 +179,10 @@ describe('PLAYER_LEAVE before a round is running', () => {
     expect(state.hostId).toBe('p2');
 
     const result = reduce(state, { type: 'OPEN_SETUP', playerId: 'p2' }, 200 + GENERATION_TIMEOUT_MS + 1);
-    expect(result.broadcasts).not.toContainEqual({ type: 'REJECTED', reason: 'NOT_HOST' });
+    expect(result.replies).not.toContainEqual({
+      to: 'p2',
+      message: { type: 'REJECTED', reason: 'NOT_HOST' },
+    });
   });
 });
 
@@ -239,7 +242,10 @@ describe('PLAYER_RECONNECT', () => {
       1200,
     );
 
-    expect(result.broadcasts).toContainEqual({ type: 'REJECTED', reason: 'BAD_TOKEN' });
+    expect(result.replies).toContainEqual({
+      to: 'p1',
+      message: { type: 'REJECTED', reason: 'BAD_TOKEN' },
+    });
     expect(result.state).toEqual(state);
     expect(result.state.players.find((p) => p.id === 'p1')?.connected).toBe(false);
   });
@@ -314,14 +320,20 @@ describe('PLAY_AGAIN', () => {
     const result = reduce(atPodium(), { type: 'PLAY_AGAIN', playerId: 'p2' }, 9000);
 
     expect(result.state.phase).toBe('PODIUM');
-    expect(result.broadcasts).toContainEqual({ type: 'REJECTED', reason: 'NOT_HOST' });
+    expect(result.replies).toContainEqual({
+      to: 'p2',
+      message: { type: 'REJECTED', reason: 'NOT_HOST' },
+    });
   });
 
   test('rejects a restart asked for from a phase that is not the podium', () => {
     const result = reduce(lobbyOf(['p1', 'p2']), { type: 'PLAY_AGAIN', playerId: 'p1' }, 9000);
 
     expect(result.state.phase).toBe('LOBBY');
-    expect(result.broadcasts).toContainEqual({ type: 'REJECTED', reason: 'BAD_PHASE' });
+    expect(result.replies).toContainEqual({
+      to: 'p1',
+      message: { type: 'REJECTED', reason: 'BAD_PHASE' },
+    });
   });
 });
 
@@ -342,7 +354,10 @@ describe('PLAY_AGAIN after a mid-game disconnect', () => {
     const lobby = reduce(podiumAfterMidGameDrop('p4'), { type: 'PLAY_AGAIN', playerId: 'p1' }, 9000).state;
     const joined = reduce(lobby, { type: 'PLAYER_JOIN', playerId: 'ana', name: 'Ana', avatarSeed: 's', reconnectToken: 'ana-token' }, 9100);
 
-    expect(joined.broadcasts).not.toContainEqual({ type: 'REJECTED', reason: 'LOBBY_FULL' });
+    expect(joined.replies).not.toContainEqual({
+      to: 'ana',
+      message: { type: 'REJECTED', reason: 'LOBBY_FULL' },
+    });
     expect(joined.state.players).toHaveLength(4);
   });
 
@@ -401,14 +416,20 @@ describe('host promotion on entry to PODIUM', () => {
   test('lets the promoted host restart the game', () => {
     const result = reduce(podiumAfterMidGameDrop('p1'), { type: 'PLAY_AGAIN', playerId: 'p2' }, 9000);
 
-    expect(result.broadcasts).not.toContainEqual({ type: 'REJECTED', reason: 'NOT_HOST' });
+    expect(result.replies).not.toContainEqual({
+      to: 'p2',
+      message: { type: 'REJECTED', reason: 'NOT_HOST' },
+    });
     expect(result.state.phase).toBe('LOBBY');
   });
 
   test('lets the promoted host open setup for another round', () => {
     const result = reduce(podiumAfterMidGameDrop('p1'), { type: 'OPEN_SETUP', playerId: 'p2' }, 9000);
 
-    expect(result.broadcasts).not.toContainEqual({ type: 'REJECTED', reason: 'NOT_HOST' });
+    expect(result.replies).not.toContainEqual({
+      to: 'p2',
+      message: { type: 'REJECTED', reason: 'NOT_HOST' },
+    });
     expect(result.state.phase).toBe('SETUP');
   });
 
