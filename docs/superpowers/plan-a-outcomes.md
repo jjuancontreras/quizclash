@@ -64,9 +64,11 @@ Accepted for V1: the spec deliberately chose guest identity with no accounts; th
 1. **Do not build the client assuming player ids are secret.**
 2. **Reserve the wire field now, even without enforcing it.** Spec §6 already commits the client to storing `{ lobbyCode, playerId }` and sending both on reconnect. Once that ships across two independently-deployed targets, adding a field is a breaking change. Mint a `reconnectSecret` at join, keep it server-side, never put it in `toPublicState`, return it only on the joining socket's first frame, and have the client store it. V1 may ignore it entirely; V2 becomes a one-line guard instead of a protocol migration.
 
-### `DEFAULT_GEMINI_MODEL` is unverified
+### `DEFAULT_GEMINI_MODEL` — verified 2026-09-13
 
-`'gemini-flash-latest'` has never been checked against a live key — no key existed during Plan A. It is isolated as a single exported constant in `src/quiz/geminiClient.ts`. **Verify before first real play.** `src/quiz/generator.ts` now logs provider errors server-side, so a wrong id is diagnosable rather than surfacing as a generic "couldn't build a quiz".
+`'gemini-flash-latest'` was confirmed against a live key: `generateContent` resolves and returns a correct response. A transient 503 ("high demand") appeared on the first two attempts and cleared on retry — normal, not a configuration problem.
+
+Worth recording: `gemini-2.5-flash` (the version named in `@google/genai`'s own README quickstart) was checked as a comparison and is now **404 — deprecated for new users**, with Google's error pointing callers at `gemini-3.6-flash`. This confirms the plan's choice of the `-latest` alias over a pinned dated version was correct — it tracks the current model automatically as Google retires versions, rather than needing code changes.
 
 ### `src/worker/**` has no coverage instrumentation
 
