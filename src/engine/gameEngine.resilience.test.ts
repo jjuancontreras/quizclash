@@ -20,10 +20,19 @@ function questions(count: number): Question[] {
   }));
 }
 
+/** Every test player reconnects with this same deterministic token. */
+function tokenFor(playerId: string): string {
+  return `${playerId}-token`;
+}
+
 function lobbyOf(playerIds: string[]): GameState {
   return playerIds.reduce<GameState>(
     (s, id, i) =>
-      reduce(s, { type: 'PLAYER_JOIN', playerId: id, name: id, avatarSeed: 's' }, i).state,
+      reduce(
+        s,
+        { type: 'PLAYER_JOIN', playerId: id, name: id, avatarSeed: 's', reconnectToken: tokenFor(id) },
+        i,
+      ).state,
     createInitialState('ABCD'),
   );
 }
@@ -31,7 +40,11 @@ function lobbyOf(playerIds: string[]): GameState {
 function atFirstQuestion(playerIds: string[], count = 3): GameState {
   let state = playerIds.reduce<GameState>(
     (s, id, i) =>
-      reduce(s, { type: 'PLAYER_JOIN', playerId: id, name: id, avatarSeed: 's' }, i).state,
+      reduce(
+        s,
+        { type: 'PLAYER_JOIN', playerId: id, name: id, avatarSeed: 's', reconnectToken: tokenFor(id) },
+        i,
+      ).state,
     createInitialState('ABCD'),
   );
   state = reduce(state, { type: 'OPEN_SETUP', playerId: playerIds[0]! }, 100).state;
@@ -115,8 +128,8 @@ describe('PLAYER_LEAVE mid-game', () => {
 
 describe('PLAYER_LEAVE before a round is running', () => {
   test('frees the seat and promotes a new host when the host drops during SETUP', () => {
-    let state = reduce(createInitialState('ABCD'), { type: 'PLAYER_JOIN', playerId: 'p1', name: 'p1', avatarSeed: 's' }, 0).state;
-    state = reduce(state, { type: 'PLAYER_JOIN', playerId: 'p2', name: 'p2', avatarSeed: 's' }, 1).state;
+    let state = reduce(createInitialState('ABCD'), { type: 'PLAYER_JOIN', playerId: 'p1', name: 'p1', avatarSeed: 's', reconnectToken: 'p1-token' }, 0).state;
+    state = reduce(state, { type: 'PLAYER_JOIN', playerId: 'p2', name: 'p2', avatarSeed: 's', reconnectToken: 'p2-token' }, 1).state;
     state = reduce(state, { type: 'OPEN_SETUP', playerId: 'p1' }, 100).state;
 
     const result = reduce(state, { type: 'PLAYER_LEAVE', playerId: 'p1' }, 200);
@@ -126,8 +139,8 @@ describe('PLAYER_LEAVE before a round is running', () => {
   });
 
   test('frees the seat and promotes a new host when the host drops during GENERATING, and generation still completes into COUNTDOWN', () => {
-    let state = reduce(createInitialState('ABCD'), { type: 'PLAYER_JOIN', playerId: 'p1', name: 'p1', avatarSeed: 's' }, 0).state;
-    state = reduce(state, { type: 'PLAYER_JOIN', playerId: 'p2', name: 'p2', avatarSeed: 's' }, 1).state;
+    let state = reduce(createInitialState('ABCD'), { type: 'PLAYER_JOIN', playerId: 'p1', name: 'p1', avatarSeed: 's', reconnectToken: 'p1-token' }, 0).state;
+    state = reduce(state, { type: 'PLAYER_JOIN', playerId: 'p2', name: 'p2', avatarSeed: 's', reconnectToken: 'p2-token' }, 1).state;
     state = reduce(state, { type: 'OPEN_SETUP', playerId: 'p1' }, 100).state;
     state = reduce(state, { type: 'SUBMIT_SETUP', playerId: 'p1', config }, 200).state;
 
@@ -141,8 +154,8 @@ describe('PLAYER_LEAVE before a round is running', () => {
   });
 
   test('preserves the pending generation deadline instead of replacing it with the idle-cleanup alarm', () => {
-    let state = reduce(createInitialState('ABCD'), { type: 'PLAYER_JOIN', playerId: 'p1', name: 'p1', avatarSeed: 's' }, 0).state;
-    state = reduce(state, { type: 'PLAYER_JOIN', playerId: 'p2', name: 'p2', avatarSeed: 's' }, 1).state;
+    let state = reduce(createInitialState('ABCD'), { type: 'PLAYER_JOIN', playerId: 'p1', name: 'p1', avatarSeed: 's', reconnectToken: 'p1-token' }, 0).state;
+    state = reduce(state, { type: 'PLAYER_JOIN', playerId: 'p2', name: 'p2', avatarSeed: 's', reconnectToken: 'p2-token' }, 1).state;
     state = reduce(state, { type: 'OPEN_SETUP', playerId: 'p1' }, 100).state;
     const submitted = reduce(state, { type: 'SUBMIT_SETUP', playerId: 'p1', config }, 200);
     state = submitted.state;
@@ -155,8 +168,8 @@ describe('PLAYER_LEAVE before a round is running', () => {
   });
 
   test('a promoted host can recover the lobby after a stranded generation times out', () => {
-    let state = reduce(createInitialState('ABCD'), { type: 'PLAYER_JOIN', playerId: 'p1', name: 'p1', avatarSeed: 's' }, 0).state;
-    state = reduce(state, { type: 'PLAYER_JOIN', playerId: 'p2', name: 'p2', avatarSeed: 's' }, 1).state;
+    let state = reduce(createInitialState('ABCD'), { type: 'PLAYER_JOIN', playerId: 'p1', name: 'p1', avatarSeed: 's', reconnectToken: 'p1-token' }, 0).state;
+    state = reduce(state, { type: 'PLAYER_JOIN', playerId: 'p2', name: 'p2', avatarSeed: 's', reconnectToken: 'p2-token' }, 1).state;
     state = reduce(state, { type: 'OPEN_SETUP', playerId: 'p1' }, 100).state;
     state = reduce(state, { type: 'SUBMIT_SETUP', playerId: 'p1', config }, 200).state;
     state = reduce(state, { type: 'PLAYER_LEAVE', playerId: 'p1' }, 300).state;
@@ -175,7 +188,11 @@ describe('PLAYER_RECONNECT', () => {
     let state = atFirstQuestion(['p1', 'p2']);
     state = reduce(state, { type: 'SUBMIT_ANSWER', playerId: 'p1', choiceIndex: 0 }, 1000).state;
     state = reduce(state, { type: 'PLAYER_LEAVE', playerId: 'p1' }, 1100).state;
-    const result = reduce(state, { type: 'PLAYER_RECONNECT', playerId: 'p1' }, 1200);
+    const result = reduce(
+      state,
+      { type: 'PLAYER_RECONNECT', playerId: 'p1', reconnectToken: tokenFor('p1') },
+      1200,
+    );
 
     expect(result.state.players.find((p) => p.id === 'p1')?.connected).toBe(true);
     expect(result.state.players.find((p) => p.id === 'p1')?.score).toBe(1000);
@@ -183,18 +200,48 @@ describe('PLAYER_RECONNECT', () => {
 
   test('broadcasts a full state snapshot so the client lands in the live phase', () => {
     const state = atFirstQuestion(['p1', 'p2']);
-    const result = reduce(state, { type: 'PLAYER_RECONNECT', playerId: 'p1' }, 1200);
+    const result = reduce(
+      state,
+      { type: 'PLAYER_RECONNECT', playerId: 'p1', reconnectToken: tokenFor('p1') },
+      1200,
+    );
     const message = result.broadcasts[0];
 
     expect(message?.type).toBe('STATE');
     if (message?.type === 'STATE') expect(message.state.phase).toBe('QUESTION');
   });
 
-  test('ignores a reconnect for an unknown player', () => {
+  test('ignores a reconnect for an unknown player regardless of the token supplied', () => {
     const state = atFirstQuestion(['p1']);
-    const result = reduce(state, { type: 'PLAYER_RECONNECT', playerId: 'ghost' }, 1200);
+    const result = reduce(
+      state,
+      { type: 'PLAYER_RECONNECT', playerId: 'ghost', reconnectToken: 'whatever' },
+      1200,
+    );
 
     expect(result.state.players).toHaveLength(1);
+  });
+
+  /**
+   * The reconnect token is the whole point of this feature: a player who
+   * merely reads another player's id off their own screen (every id is
+   * broadcast in every STATE frame) must not be able to seat themselves as
+   * that player. A mismatched token must be rejected, and rejected without
+   * touching state at all — not even flipping `connected` back to true.
+   */
+  test('rejects a reconnect whose token does not match the seated player\'s, leaving state untouched', () => {
+    let state = atFirstQuestion(['p1', 'p2']);
+    state = reduce(state, { type: 'PLAYER_LEAVE', playerId: 'p1' }, 1100).state;
+
+    const result = reduce(
+      state,
+      { type: 'PLAYER_RECONNECT', playerId: 'p1', reconnectToken: 'an-attacker-guess' },
+      1200,
+    );
+
+    expect(result.broadcasts).toContainEqual({ type: 'REJECTED', reason: 'BAD_TOKEN' });
+    expect(result.state).toEqual(state);
+    expect(result.state.players.find((p) => p.id === 'p1')?.connected).toBe(false);
   });
 
   /**
@@ -211,7 +258,11 @@ describe('PLAYER_RECONNECT', () => {
     const emptied = reduce(state, { type: 'PLAYER_LEAVE', playerId: 'p2' }, 1200);
     expect(emptied.effect).toEqual({ type: 'CLEANUP' });
 
-    const result = reduce(emptied.state, { type: 'PLAYER_RECONNECT', playerId: 'p1' }, 1300);
+    const result = reduce(
+      emptied.state,
+      { type: 'PLAYER_RECONNECT', playerId: 'p1', reconnectToken: tokenFor('p1') },
+      1300,
+    );
 
     expect(result.state.phase).toBe('QUESTION');
     expect(result.alarmAtMs).toBe(result.state.phaseEndsAtMs);
@@ -219,10 +270,14 @@ describe('PLAYER_RECONNECT', () => {
   });
 
   test('does not resurrect a player who left during the lobby', () => {
-    let state = reduce(createInitialState('ABCD'), { type: 'PLAYER_JOIN', playerId: 'p1', name: 'p1', avatarSeed: 's' }, 0).state;
-    state = reduce(state, { type: 'PLAYER_JOIN', playerId: 'p2', name: 'p2', avatarSeed: 's' }, 1).state;
+    let state = reduce(createInitialState('ABCD'), { type: 'PLAYER_JOIN', playerId: 'p1', name: 'p1', avatarSeed: 's', reconnectToken: 'p1-token' }, 0).state;
+    state = reduce(state, { type: 'PLAYER_JOIN', playerId: 'p2', name: 'p2', avatarSeed: 's', reconnectToken: 'p2-token' }, 1).state;
     state = reduce(state, { type: 'PLAYER_LEAVE', playerId: 'p2' }, 2).state;
-    const result = reduce(state, { type: 'PLAYER_RECONNECT', playerId: 'p2' }, 3);
+    const result = reduce(
+      state,
+      { type: 'PLAYER_RECONNECT', playerId: 'p2', reconnectToken: 'p2-token' },
+      3,
+    );
 
     expect(result.state.players).toHaveLength(1);
   });
@@ -285,7 +340,7 @@ describe('PLAY_AGAIN after a mid-game disconnect', () => {
 
   test('frees the ghost seat so a replacement player can take it', () => {
     const lobby = reduce(podiumAfterMidGameDrop('p4'), { type: 'PLAY_AGAIN', playerId: 'p1' }, 9000).state;
-    const joined = reduce(lobby, { type: 'PLAYER_JOIN', playerId: 'ana', name: 'Ana', avatarSeed: 's' }, 9100);
+    const joined = reduce(lobby, { type: 'PLAYER_JOIN', playerId: 'ana', name: 'Ana', avatarSeed: 's', reconnectToken: 'ana-token' }, 9100);
 
     expect(joined.broadcasts).not.toContainEqual({ type: 'REJECTED', reason: 'LOBBY_FULL' });
     expect(joined.state.players).toHaveLength(4);
@@ -304,9 +359,9 @@ describe('PLAY_AGAIN after a mid-game disconnect', () => {
       ...podiumAfterMidGameDrop('p4'),
       hostId: 'gone',
       players: [
-        { id: 'gone', name: 'gone', avatarSeed: 's', score: 0, joinedAtMs: 0, connected: false },
-        { id: 'p2', name: 'p2', avatarSeed: 's', score: 10, joinedAtMs: 1, connected: true },
-        { id: 'p3', name: 'p3', avatarSeed: 's', score: 10, joinedAtMs: 2, connected: true },
+        { id: 'gone', name: 'gone', avatarSeed: 's', score: 0, joinedAtMs: 0, connected: false, reconnectToken: 'gone-token' },
+        { id: 'p2', name: 'p2', avatarSeed: 's', score: 10, joinedAtMs: 1, connected: true, reconnectToken: 'p2-token' },
+        { id: 'p3', name: 'p3', avatarSeed: 's', score: 10, joinedAtMs: 2, connected: true, reconnectToken: 'p3-token' },
       ],
     };
 
@@ -321,7 +376,7 @@ describe('PLAY_AGAIN after a mid-game disconnect', () => {
       ...podiumAfterMidGameDrop('p4'),
       hostId: 'gone',
       players: [
-        { id: 'gone', name: 'gone', avatarSeed: 's', score: 0, joinedAtMs: 0, connected: false },
+        { id: 'gone', name: 'gone', avatarSeed: 's', score: 0, joinedAtMs: 0, connected: false, reconnectToken: 'gone-token' },
       ],
     };
 

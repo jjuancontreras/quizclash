@@ -8,7 +8,11 @@ const config: SetupConfig = { count: 5, difficulty: 'easy', focus: '', sourceKin
 function lobbyWith(ids: string[]): GameState {
   return ids.reduce<GameState>(
     (s, id, i) =>
-      reduce(s, { type: 'PLAYER_JOIN', playerId: id, name: id, avatarSeed: 's' }, i).state,
+      reduce(
+        s,
+        { type: 'PLAYER_JOIN', playerId: id, name: id, avatarSeed: 's', reconnectToken: `${id}-token` },
+        i,
+      ).state,
     createInitialState('ABCD'),
   );
 }

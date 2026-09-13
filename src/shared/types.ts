@@ -26,7 +26,16 @@ export interface Player {
   readonly score: number;
   readonly joinedAtMs: number;
   readonly connected: boolean;
+  /**
+   * Proof that a reconnecting socket really belongs to this seat. Generated
+   * server-side on join and never broadcast — see `PublicPlayer`, which is
+   * the shape that actually reaches the wire.
+   */
+  readonly reconnectToken: string;
 }
+
+/** The client-safe projection of a `Player` — everything but the secret. */
+export type PublicPlayer = Omit<Player, 'reconnectToken'>;
 
 export interface SetupConfig {
   readonly count: QuestionCount;
@@ -65,9 +74,15 @@ export interface GameState {
 
 /** Events the reducer accepts. All external input becomes one of these. */
 export type EngineEvent =
-  | { readonly type: 'PLAYER_JOIN'; readonly playerId: string; readonly name: string; readonly avatarSeed: string }
+  | {
+      readonly type: 'PLAYER_JOIN';
+      readonly playerId: string;
+      readonly name: string;
+      readonly avatarSeed: string;
+      readonly reconnectToken: string;
+    }
   | { readonly type: 'PLAYER_LEAVE'; readonly playerId: string }
-  | { readonly type: 'PLAYER_RECONNECT'; readonly playerId: string }
+  | { readonly type: 'PLAYER_RECONNECT'; readonly playerId: string; readonly reconnectToken: string }
   | { readonly type: 'OPEN_SETUP'; readonly playerId: string }
   | { readonly type: 'SUBMIT_SETUP'; readonly playerId: string; readonly config: SetupConfig }
   | {
@@ -84,7 +99,11 @@ export type EngineEvent =
 export type ServerMessage =
   | { readonly type: 'STATE'; readonly state: PublicState }
   | { readonly type: 'ERROR'; readonly message: string }
-  | { readonly type: 'REJECTED'; readonly reason: 'LOBBY_FULL' | 'NOT_HOST' | 'BAD_PHASE' };
+  | {
+      readonly type: 'REJECTED';
+      readonly reason: 'LOBBY_FULL' | 'NOT_HOST' | 'BAD_PHASE' | 'BAD_TOKEN';
+    }
+  | { readonly type: 'IDENTITY'; readonly playerId: string; readonly reconnectToken: string };
 
 /**
  * The client-safe projection of state. Critically, it omits `correctIndex`
@@ -95,7 +114,7 @@ export interface PublicState {
   readonly phase: GamePhase;
   readonly lobbyCode: string;
   readonly hostId: string | null;
-  readonly players: readonly Player[];
+  readonly players: readonly PublicPlayer[];
   readonly questionIndex: number;
   readonly totalQuestions: number;
   readonly phaseEndsAtMs: number | null;

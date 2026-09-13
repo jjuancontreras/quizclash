@@ -92,7 +92,7 @@ export function toPublicState(state: GameState): PublicState {
     phase: state.phase,
     lobbyCode: state.lobbyCode,
     hostId: state.hostId,
-    players: state.players,
+    players: state.players.map(({ reconnectToken, ...publicPlayer }) => publicPlayer),
     questionIndex: state.questionIndex,
     totalQuestions: state.questions.length,
     phaseEndsAtMs: state.phaseEndsAtMs,
@@ -128,7 +128,7 @@ function result(state: GameState, overrides: Partial<EngineResult> = {}): Engine
 
 function rejected(
   state: GameState,
-  reason: 'LOBBY_FULL' | 'NOT_HOST' | 'BAD_PHASE',
+  reason: 'LOBBY_FULL' | 'NOT_HOST' | 'BAD_PHASE' | 'BAD_TOKEN',
 ): EngineResult {
   return { state, broadcasts: [{ type: 'REJECTED', reason }], alarmAtMs: null, effect: null };
 }
@@ -152,6 +152,7 @@ function handleJoin(
     score: 0,
     joinedAtMs: nowMs,
     connected: true,
+    reconnectToken: event.reconnectToken,
   };
 
   const next: GameState = {
@@ -250,10 +251,17 @@ function handleLeave(
  * phase nothing can end. A deadline already in the past makes `setAlarm` fire
  * immediately, which is the correct recovery.
  */
-function handleReconnect(state: GameState, playerId: string): EngineResult {
-  if (!state.players.some((p) => p.id === playerId)) return result(state);
+function handleReconnect(
+  state: GameState,
+  event: Extract<EngineEvent, { type: 'PLAYER_RECONNECT' }>,
+): EngineResult {
+  const player = state.players.find((p) => p.id === event.playerId);
+  if (player === undefined) return result(state);
+  if (player.reconnectToken !== event.reconnectToken) return rejected(state, 'BAD_TOKEN');
 
-  const players = state.players.map((p) => (p.id === playerId ? { ...p, connected: true } : p));
+  const players = state.players.map((p) =>
+    p.id === event.playerId ? { ...p, connected: true } : p,
+  );
   return result({ ...state, players }, { alarmAtMs: state.phaseEndsAtMs });
 }
 
@@ -464,7 +472,7 @@ export function reduce(state: GameState, event: EngineEvent, nowMs: number): Eng
     case 'PLAYER_LEAVE':
       return handleLeave(state, event, nowMs);
     case 'PLAYER_RECONNECT':
-      return handleReconnect(state, event.playerId);
+      return handleReconnect(state, event);
     case 'PLAY_AGAIN':
       return handlePlayAgain(state, event.playerId);
     case 'OPEN_SETUP':

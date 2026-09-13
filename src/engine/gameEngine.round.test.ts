@@ -19,7 +19,11 @@ function questions(count: number): Question[] {
 function atFirstQuestion(playerIds: string[], count = 5): GameState {
   let state = playerIds.reduce<GameState>(
     (s, id, i) =>
-      reduce(s, { type: 'PLAYER_JOIN', playerId: id, name: id, avatarSeed: 's' }, i).state,
+      reduce(
+        s,
+        { type: 'PLAYER_JOIN', playerId: id, name: id, avatarSeed: 's', reconnectToken: `${id}-token` },
+        i,
+      ).state,
     createInitialState('ABCD'),
   );
   state = reduce(state, { type: 'OPEN_SETUP', playerId: playerIds[0]! }, 100).state;
@@ -41,7 +45,11 @@ describe('countdown expiry', () => {
   });
 
   test('arms the alarm for the end of the answer window', () => {
-    let state = reduce(createInitialState('ABCD'), { type: 'PLAYER_JOIN', playerId: 'p1', name: 'p1', avatarSeed: 's' }, 0).state;
+    let state = reduce(
+      createInitialState('ABCD'),
+      { type: 'PLAYER_JOIN', playerId: 'p1', name: 'p1', avatarSeed: 's', reconnectToken: 'p1-token' },
+      0,
+    ).state;
     state = reduce(state, { type: 'OPEN_SETUP', playerId: 'p1' }, 100).state;
     state = reduce(state, { type: 'SUBMIT_SETUP', playerId: 'p1', config }, 200).state;
     state = reduce(state, { type: 'GENERATION_SUCCEEDED', generationId: state.generationId, questions: questions(5) }, 300).state;
