@@ -148,11 +148,17 @@ describe('GameRoom', () => {
   });
 
   /**
-   * The property that actually matters: IDENTITY is unicast. A second
-   * player's socket must never see a frame naming the first player's id —
-   * that would just move the leak from STATE to a different message type.
+   * The property that actually matters: IDENTITY is unicast, not broadcast.
+   * The one moment a leak could happen is when a second player joins while
+   * the first is already connected — the first socket is listening and
+   * would receive a broadcast if the send were ever changed to one. Every
+   * join broadcasts a STATE frame to already-connected sockets regardless
+   * (proven by the existing "holds engine state" test), so the first socket
+   * is guaranteed to receive at least that one frame; this test asserts it
+   * receives nothing else, in particular no IDENTITY naming the second
+   * player.
    */
-  test('never sends a second socket the IDENTITY meant for someone else', async () => {
+  test('never sends an already-connected socket the IDENTITY meant for someone else', async () => {
     const stub = room('UNIC');
     const first = await stub.fetch('https://do/ws?code=UNIC&name=Juan&seed=s1&playerId=p1', {
       headers: { Upgrade: 'websocket' },
@@ -161,6 +167,21 @@ describe('GameRoom', () => {
     if (firstClient === null) throw new Error('expected a websocket in the response');
     firstClient.accept();
 
+    // Drain p1's own IDENTITY + STATE from its own join before watching for
+    // whatever arrives once p2 joins.
+    const firstMessagesAfterOwnJoin: { type: string; playerId?: string }[] = [];
+    await new Promise<void>((resolve) => {
+      firstClient.addEventListener('message', (event) => {
+        firstMessagesAfterOwnJoin.push(JSON.parse(String(event.data)));
+        if (firstMessagesAfterOwnJoin.length === 2) resolve();
+      });
+    });
+
+    const leakedToFirst: { type: string; playerId?: string }[] = [];
+    firstClient.addEventListener('message', (event) => {
+      leakedToFirst.push(JSON.parse(String(event.data)));
+    });
+
     const second = await stub.fetch('https://do/ws?code=UNIC&name=Ana&seed=s2&playerId=p2', {
       headers: { Upgrade: 'websocket' },
     });
@@ -168,16 +189,26 @@ describe('GameRoom', () => {
     if (secondClient === null) throw new Error('expected a websocket in the response');
     secondClient.accept();
 
-    const secondMessages: { type: string; playerId?: string }[] = [];
+    // Every join broadcasts a STATE frame to already-connected sockets
+    // regardless of the identity feature, so p1 is guaranteed to receive
+    // exactly that one frame here. Wait for it, then give any extra (leaked)
+    // frame a further moment to arrive before asserting on the full set.
     await new Promise<void>((resolve) => {
-      secondClient.addEventListener('message', (event) => {
-        secondMessages.push(JSON.parse(String(event.data)));
-        if (secondMessages.length === 2) resolve();
-      });
+      const seenAlready = leakedToFirst.some((m) => m.type === 'STATE');
+      if (seenAlready) { resolve(); return; }
+      const onMessage = (event: MessageEvent): void => {
+        const message = JSON.parse(String(event.data)) as { type: string };
+        if (message.type === 'STATE') {
+          firstClient.removeEventListener('message', onMessage);
+          resolve();
+        }
+      };
+      firstClient.addEventListener('message', onMessage);
     });
+    await new Promise((resolve) => setTimeout(resolve, 100));
 
-    const leakedIdentity = secondMessages.find((m) => m.type === 'IDENTITY' && m.playerId === 'p1');
-    expect(leakedIdentity).toBeUndefined();
+    expect(leakedToFirst).toEqual([{ type: 'STATE', state: expect.anything() }]);
+    expect(leakedToFirst.find((m) => m.type === 'IDENTITY' && m.playerId === 'p2')).toBeUndefined();
   });
 
   test('accepts a reconnect whose token matches the one issued on join', async () => {
