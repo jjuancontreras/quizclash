@@ -1,5 +1,5 @@
-import { describe, expect, test, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, expect, test, vi, afterEach } from 'vitest';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import QuestionScreen from './QuestionScreen.js';
 import type { PublicState, PublicPlayer } from '../../../src/shared/types.js';
@@ -28,6 +28,31 @@ function makeState(overrides: Partial<PublicState> = {}): PublicState {
 }
 
 describe('QuestionScreen', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  test('shrinks the timer bar over time, driven by the animation-frame loop rather than a frozen read', () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    vi.setSystemTime(now);
+    const { container } = render(
+      <QuestionScreen state={makeState({ phaseEndsAtMs: now + 20000 })} players={players} selfId="p1" onAnswer={() => {}} />,
+    );
+    const indicator = container.querySelector('[data-slot="progress-indicator"]') as HTMLElement;
+    const initialTransform = indicator.style.transform;
+
+    // Advance the (faked) rAF loop so the component's own tick picks up the new
+    // time, mirroring CountdownScreen's test for the same requestAnimationFrame
+    // pattern — advancing fake timers moves Date.now() in lockstep with the
+    // clock that schedules requestAnimationFrame.
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+
+    expect(indicator.style.transform).not.toBe(initialTransform);
+  });
+
   test('renders the question text and all four choices', () => {
     render(<QuestionScreen state={makeState()} players={players} selfId="p1" onAnswer={() => {}} />);
     expect(screen.getByText('What powers the cell?')).toBeInTheDocument();

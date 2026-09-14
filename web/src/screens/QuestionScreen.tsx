@@ -1,6 +1,8 @@
+import { useEffect, useState } from 'react';
 import { Progress } from '../components/ui/progress.js';
 import AnswerTile from '../components/AnswerTile.js';
 import type { ChoiceIndex, PublicPlayer, PublicState } from '../../../src/shared/types.js';
+import { QUESTION_WINDOW_MS } from '../../../src/shared/constants.js';
 
 export interface QuestionScreenProps {
   readonly state: PublicState;
@@ -10,11 +12,24 @@ export interface QuestionScreenProps {
 }
 
 export default function QuestionScreen({ state, players, selfId, onAnswer }: QuestionScreenProps) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (state.phaseEndsAtMs === null) return;
+    let frame: number;
+    const tick = () => {
+      setNow(Date.now());
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [state.phaseEndsAtMs]);
+
   if (state.prompt === null) return null;
 
   const hasAnswered = state.answered.includes(selfId);
   const timeFraction =
-    state.phaseEndsAtMs === null ? 1 : Math.max(0, (state.phaseEndsAtMs - Date.now()) / 20000);
+    state.phaseEndsAtMs === null ? 1 : Math.max(0, (state.phaseEndsAtMs - now) / QUESTION_WINDOW_MS);
 
   return (
     <div className="flex h-full flex-col">
