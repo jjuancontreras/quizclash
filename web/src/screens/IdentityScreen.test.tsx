@@ -33,6 +33,20 @@ describe('IdentityScreen', () => {
     expect(screen.getByRole('button', { name: /join/i })).toBeDisabled();
   });
 
+  test('Join stays disabled with only a name entered, no code', async () => {
+    render(<IdentityScreen onJoin={() => {}} />);
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/name/i), 'Juan');
+    expect(screen.getByRole('button', { name: /join/i })).toBeDisabled();
+  });
+
+  test('Join stays disabled with only a code entered, no name', async () => {
+    render(<IdentityScreen onJoin={() => {}} />);
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/lobby code/i), 'ABCD');
+    expect(screen.getByRole('button', { name: /join/i })).toBeDisabled();
+  });
+
   test('calls onJoin with an empty code when "Create Lobby" is clicked, signalling a fresh lobby', async () => {
     const onJoin = vi.fn();
     render(<IdentityScreen onJoin={onJoin} />);
