@@ -32,7 +32,10 @@ describe('AvatarPicker', () => {
   });
 
   test('marks the currently selected avatar distinctly from the others', () => {
-    render(<AvatarPicker value="seed-1" onChange={() => {}} />);
+    const { rerender } = render(<AvatarPicker value="" onChange={() => {}} />);
+    const firstSeed = new URL(screen.getAllByRole('img')[0]!.getAttribute('src')!).searchParams.get('seed')!;
+
+    rerender(<AvatarPicker value={firstSeed} onChange={() => {}} />);
     const selected = screen.getByRole('img', { name: /selected/i });
     expect(selected).toBeInTheDocument();
   });
