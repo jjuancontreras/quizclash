@@ -3,6 +3,7 @@ import { Button } from '../components/ui/button.js';
 import { Card } from '../components/ui/card.js';
 import { Label } from '../components/ui/label.js';
 import type { PublicState, QuestionCount, Difficulty, SetupConfig } from '../../../src/shared/types.js';
+import { MAX_UPLOAD_BYTES } from '../../../src/shared/constants.js';
 
 const COUNTS: readonly QuestionCount[] = [5, 10, 15, 20];
 const DIFFICULTIES: readonly Difficulty[] = ['easy', 'medium', 'hard'];
@@ -20,6 +21,7 @@ export default function SetupScreen({ state, selfId, onSubmit }: SetupScreenProp
   const [sourceTab, setSourceTab] = useState<'pdf' | 'text'>('text');
   const [pastedText, setPastedText] = useState('');
   const [pdfBase64, setPdfBase64] = useState<string | null>(null);
+  const [pdfError, setPdfError] = useState<string | null>(null);
   const [count, setCount] = useState<QuestionCount>(10);
   const [difficulty, setDifficulty] = useState<Difficulty>('medium');
   const [focus, setFocus] = useState('');
@@ -83,6 +85,12 @@ export default function SetupScreen({ state, selfId, onSubmit }: SetupScreenProp
             onChange={(e) => {
               const file = e.target.files?.[0];
               if (file === undefined) return;
+              if (file.size > MAX_UPLOAD_BYTES) {
+                setPdfBase64(null);
+                setPdfError('That PDF is too large — please use a file under 10MB.');
+                return;
+              }
+              setPdfError(null);
               const reader = new FileReader();
               reader.onload = () => {
                 const result = reader.result as string;
@@ -91,6 +99,11 @@ export default function SetupScreen({ state, selfId, onSubmit }: SetupScreenProp
               reader.readAsDataURL(file);
             }}
           />
+          {pdfError !== null && (
+            <p role="alert" className="text-sm font-bold text-red-600">
+              {pdfError}
+            </p>
+          )}
         </div>
       ) : (
         <div>

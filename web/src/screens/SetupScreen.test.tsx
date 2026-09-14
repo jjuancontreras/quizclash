@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SetupScreen from './SetupScreen.js';
 import type { PublicState } from '../../../src/shared/types.js';
+import { MAX_UPLOAD_BYTES } from '../../../src/shared/constants.js';
 
 function makeState(overrides: Partial<PublicState> = {}): PublicState {
   return {
@@ -77,6 +78,24 @@ describe('SetupScreen', () => {
     );
     const [, source] = onSubmit.mock.calls[0]!;
     expect((source as { kind: 'pdf'; base64: string }).base64.length).toBeGreaterThan(0);
+  });
+
+  test('an oversized PDF is rejected client-side and never enables Generate', async () => {
+    const onSubmit = vi.fn();
+    render(<SetupScreen state={makeState({ hostId: 'p1' })} selfId="p1" onSubmit={onSubmit} />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('tab', { name: /upload pdf/i }));
+
+    const oversizedFile = new File(['not actually 10MB'], 'huge.pdf', { type: 'application/pdf' });
+    Object.defineProperty(oversizedFile, 'size', { value: MAX_UPLOAD_BYTES + 1 });
+
+    const input = screen.getByLabelText(/drop a pdf/i);
+    await user.upload(input, oversizedFile);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/too large/i);
+    expect(screen.getByRole('button', { name: /generate/i })).toBeDisabled();
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   test('switching tabs hides the other tab\'s input, in both directions', async () => {
