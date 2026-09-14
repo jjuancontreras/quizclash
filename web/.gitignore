@@ -1,0 +1,5 @@
+# The root .gitignore's `.env*` pattern would also catch this dev-only,
+# non-secret default (VITE_WS_HOST=localhost:8787) — re-include it so it's
+# tracked. `.env.production` stays ignored by the root pattern: the
+# deployed Worker's real host is set at Vercel deploy time, not hardcoded.
+!.env.development
