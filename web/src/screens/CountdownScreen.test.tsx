@@ -12,10 +12,17 @@ import CountdownScreen from './CountdownScreen.js';
 // finishes swapping in the next child during a synchronous, fake-timers test.
 // That's a jsdom/motion testability gap, not a bug in CountdownScreen's logic
 // (confirmed separately: a bare component using the same requestAnimationFrame
-// pattern without motion updates correctly under advanceTimersByTime). Only
-// the one test below that needs to observe a re-render past the first mount
-// relies on this mock to bypass the animation gating; the rest of this file
-// exercises the real motion/react import.
+// pattern without motion updates correctly under advanceTimersByTime).
+//
+// vi.mock() is hoisted by Vitest and applies file-wide, so ALL FIVE tests
+// below render through this pass-through stub, not just the one that needs
+// it — none of them exercise the real motion/react import. Only the
+// re-render test actually depends on the stub's behavior (bypassing the
+// animation gating); the other four would pass identically against the real
+// library. The stub is a harmless no-op pass-through (same children,
+// className, and DOM shape), so this doesn't weaken what any test asserts —
+// it's called out here only so nobody reading this file later assumes most
+// of it still exercises real motion/react.
 vi.mock('motion/react', () => ({
   motion: {
     div: ({ children, className }: { children?: ReactNode; className?: string }) => (
