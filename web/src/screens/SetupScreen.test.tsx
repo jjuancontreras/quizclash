@@ -152,4 +152,23 @@ describe('SetupScreen', () => {
     expect(screen.getByText(/building your quiz/i)).toBeInTheDocument();
     expect(screen.queryByText(/host is building/i)).not.toBeInTheDocument();
   });
+
+  // Finding 3 (Plan B review): a generation failure populates state.error,
+  // but the host previously saw no explanation when GENERATING bounced back
+  // to SETUP — just the upload wizard reappearing.
+  test('renders state.error for the host when generation has failed', () => {
+    render(
+      <SetupScreen
+        state={makeState({ hostId: 'p1', error: 'Quiz generation timed out. Please try again.' })}
+        selfId="p1"
+        onSubmit={() => {}}
+      />,
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent(/quiz generation timed out/i);
+  });
+
+  test('renders nothing extra when state.error is null', () => {
+    render(<SetupScreen state={makeState({ hostId: 'p1', error: null })} selfId="p1" onSubmit={() => {}} />);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
 });

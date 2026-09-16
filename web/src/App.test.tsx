@@ -59,7 +59,7 @@ describe('App', () => {
       join: joinSpy,
       send: vi.fn(),
     });
-    globalThis.fetch = vi.fn().mockResolvedValue({ json: () => Promise.resolve({ code: 'NEWC' }) }) as unknown as typeof fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ code: 'NEWC' }) }) as unknown as typeof fetch;
 
     render(<App />);
     const user = userEvent.setup();
@@ -69,5 +69,53 @@ describe('App', () => {
 
     expect(globalThis.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/lobby'), expect.objectContaining({ method: 'POST' }));
     expect(joinSpy).toHaveBeenCalledWith(expect.objectContaining({ code: 'NEWC' }));
+  });
+
+  // Finding 1 (Plan B review): handleJoin is async but IdentityScreen's
+  // onClick discards the returned promise, so a rejected fetch used to
+  // become an unhandled rejection with zero user-visible feedback.
+  test('a network failure while creating a lobby surfaces a user-visible error instead of failing silently', async () => {
+    const joinSpy = vi.fn();
+    vi.mocked(useGameConnection).mockReturnValue({
+      state: null,
+      connectionStatus: 'disconnected',
+      rejection: null,
+      join: joinSpy,
+      send: vi.fn(),
+    });
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('network down')) as unknown as typeof fetch;
+
+    render(<App />);
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/name/i), 'Juan');
+    await user.click(screen.getAllByRole('img')[0]!);
+    await user.click(screen.getByRole('button', { name: /create lobby/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/could not reach the server/i);
+    expect(joinSpy).not.toHaveBeenCalled();
+  });
+
+  test('a non-2xx response while creating a lobby surfaces a user-visible error instead of throwing inside .json()', async () => {
+    const joinSpy = vi.fn();
+    vi.mocked(useGameConnection).mockReturnValue({
+      state: null,
+      connectionStatus: 'disconnected',
+      rejection: null,
+      join: joinSpy,
+      send: vi.fn(),
+    });
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      json: () => Promise.reject(new Error('should not be called')),
+    }) as unknown as typeof fetch;
+
+    render(<App />);
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/name/i), 'Juan');
+    await user.click(screen.getAllByRole('img')[0]!);
+    await user.click(screen.getByRole('button', { name: /create lobby/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/could not create a lobby/i);
+    expect(joinSpy).not.toHaveBeenCalled();
   });
 });

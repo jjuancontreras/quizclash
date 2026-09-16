@@ -7,8 +7,14 @@ describe('session storage', () => {
   });
 
   test('round-trips a saved session', () => {
-    saveSession({ lobbyCode: 'ABCD', playerId: 'p1', reconnectToken: 'secret-token' });
-    expect(loadSession()).toEqual({ lobbyCode: 'ABCD', playerId: 'p1', reconnectToken: 'secret-token' });
+    saveSession({ lobbyCode: 'ABCD', playerId: 'p1', reconnectToken: 'secret-token', name: 'Juan', avatarSeed: 'seed-1' });
+    expect(loadSession()).toEqual({
+      lobbyCode: 'ABCD',
+      playerId: 'p1',
+      reconnectToken: 'secret-token',
+      name: 'Juan',
+      avatarSeed: 'seed-1',
+    });
   });
 
   test('returns null when nothing is stored', () => {
@@ -20,8 +26,16 @@ describe('session storage', () => {
     expect(loadSession()).toBeNull();
   });
 
+  test('returns null for a stored session missing name/avatarSeed (pre-Finding-4 shape)', () => {
+    sessionStorage.setItem(
+      'quizclash-session',
+      JSON.stringify({ lobbyCode: 'ABCD', playerId: 'p1', reconnectToken: 'secret-token' }),
+    );
+    expect(loadSession()).toBeNull();
+  });
+
   test('clearSession removes the stored session', () => {
-    saveSession({ lobbyCode: 'ABCD', playerId: 'p1', reconnectToken: 'secret-token' });
+    saveSession({ lobbyCode: 'ABCD', playerId: 'p1', reconnectToken: 'secret-token', name: 'Juan', avatarSeed: 'seed-1' });
     clearSession();
     expect(loadSession()).toBeNull();
   });

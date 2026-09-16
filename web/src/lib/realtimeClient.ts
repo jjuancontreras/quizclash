@@ -44,6 +44,16 @@ export class RealtimeClient {
   private listeners: Set<Listener> = new Set();
 
   connect(params: ConnectParams): void {
+    // A second connect() (e.g. a manual join racing an in-flight reconnect,
+    // Finding 5 in the Plan B review) must replace, not join, the previous
+    // socket — otherwise both stay live and STATE frames from either can
+    // win the render. Null the old socket's onclose first so closing it
+    // deliberately here doesn't also emit a spurious 'disconnected' event.
+    if (this.socket !== null) {
+      this.socket.onclose = null;
+      this.socket.close();
+    }
+
     const url = new URL(`wss://${params.host}/ws`);
     url.searchParams.set('code', params.code);
     url.searchParams.set('playerId', params.playerId);

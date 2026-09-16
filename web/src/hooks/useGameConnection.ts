@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RealtimeClient, type ClientEvent, type ClientMessage } from '../lib/realtimeClient.js';
 import { loadSession, saveSession } from '../lib/session.js';
+import { WS_HOST } from '../lib/wsHost.js';
 import type { PublicState } from '../../../src/shared/types.js';
-
-const WS_HOST = import.meta.env.VITE_WS_HOST as string;
 
 export interface JoinParams {
   readonly code: string;
@@ -41,6 +40,11 @@ export function useGameConnection(): UseGameConnection {
     clientRef.current = new RealtimeClient();
   }
   const lobbyCodeRef = useRef<string | null>(null);
+  // Mirrors lobbyCodeRef: the identity handler needs the name/avatarSeed the
+  // player is connecting with (fresh join or persisted reconnect) so it can
+  // save them alongside the minted reconnectToken — see the identity case
+  // below and Finding 4 in the Plan B review.
+  const identityRef = useRef<{ name: string; avatarSeed: string } | null>(null);
 
   const [state, setState] = useState<PublicState | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>(
@@ -61,11 +65,13 @@ export function useGameConnection(): UseGameConnection {
         setRejection(null);
         return;
       case 'identity':
-        if (lobbyCodeRef.current !== null) {
+        if (lobbyCodeRef.current !== null && identityRef.current !== null) {
           saveSession({
             lobbyCode: lobbyCodeRef.current,
             playerId: event.playerId,
             reconnectToken: event.reconnectToken,
+            name: identityRef.current.name,
+            avatarSeed: identityRef.current.avatarSeed,
           });
         }
         return;
@@ -90,14 +96,15 @@ export function useGameConnection(): UseGameConnection {
     if (existing === null) return;
 
     lobbyCodeRef.current = existing.lobbyCode;
+    identityRef.current = { name: existing.name, avatarSeed: existing.avatarSeed };
     setConnectionStatus('connecting');
     clientRef.current?.connect({
       host: WS_HOST,
       code: existing.lobbyCode,
       playerId: existing.playerId,
       token: existing.reconnectToken,
-      name: '',
-      avatarSeed: '',
+      name: existing.name,
+      avatarSeed: existing.avatarSeed,
     });
     // Mount-only: a fresh join() call is a distinct, explicit user action
     // and must not be triggered by this effect re-running.
@@ -106,6 +113,7 @@ export function useGameConnection(): UseGameConnection {
 
   const join = useCallback((params: JoinParams) => {
     lobbyCodeRef.current = params.code;
+    identityRef.current = { name: params.name, avatarSeed: params.avatarSeed };
     setConnectionStatus('connecting');
     clientRef.current?.connect({
       host: WS_HOST,

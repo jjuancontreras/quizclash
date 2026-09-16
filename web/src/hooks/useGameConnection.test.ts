@@ -80,13 +80,55 @@ describe('useGameConnection', () => {
   });
 
   test('mounting with an existing stored session auto-connects using it, including its token', () => {
-    saveSession({ lobbyCode: 'WXYZ', playerId: 'p1', reconnectToken: 'stored-secret' });
+    saveSession({
+      lobbyCode: 'WXYZ',
+      playerId: 'p1',
+      reconnectToken: 'stored-secret',
+      name: 'Juan',
+      avatarSeed: 'seed-9',
+    });
 
     renderHook(() => useGameConnection());
 
     const instance = vi.mocked(RealtimeClient).mock.instances[0]!;
     expect(instance.connect).toHaveBeenCalledWith(
       expect.objectContaining({ code: 'WXYZ', playerId: 'p1', token: 'stored-secret' }),
+    );
+  });
+
+  // Finding 4 (Plan B review): a reconnect used to pass empty name/avatarSeed,
+  // which the server treats as a fresh join when the seat was pruned,
+  // silently resetting the player's identity to defaults.
+  test('mounting with an existing stored session reconnects using its persisted name and avatarSeed, not empty strings', () => {
+    saveSession({
+      lobbyCode: 'WXYZ',
+      playerId: 'p1',
+      reconnectToken: 'stored-secret',
+      name: 'Juan',
+      avatarSeed: 'seed-9',
+    });
+
+    renderHook(() => useGameConnection());
+
+    const instance = vi.mocked(RealtimeClient).mock.instances[0]!;
+    expect(instance.connect).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'Juan', avatarSeed: 'seed-9' }),
+    );
+  });
+
+  test('an identity event received after a fresh join persists the join name and avatarSeed', () => {
+    const { result } = renderHook(() => useGameConnection());
+    const instance = vi.mocked(RealtimeClient).mock.instances[0]!;
+    const onHandler = vi.mocked(instance.on).mock.calls[0]![0];
+
+    act(() => {
+      result.current.join({ code: 'ABCD', name: 'Juan', avatarSeed: 'seed-1' });
+      onHandler({ type: 'identity', playerId: 'p1', reconnectToken: 'minted-secret' });
+    });
+
+    const stored = JSON.parse(sessionStorage.getItem('quizclash-session')!);
+    expect(stored).toEqual(
+      expect.objectContaining({ name: 'Juan', avatarSeed: 'seed-1', reconnectToken: 'minted-secret' }),
     );
   });
 });

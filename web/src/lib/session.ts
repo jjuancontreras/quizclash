@@ -4,6 +4,8 @@ export interface StoredSession {
   readonly lobbyCode: string;
   readonly playerId: string;
   readonly reconnectToken: string;
+  readonly name: string;
+  readonly avatarSeed: string;
 }
 
 export function saveSession(session: StoredSession): void {
@@ -21,7 +23,9 @@ export function loadSession(): StoredSession | null {
       parsed !== null &&
       'lobbyCode' in parsed &&
       'playerId' in parsed &&
-      'reconnectToken' in parsed
+      'reconnectToken' in parsed &&
+      'name' in parsed &&
+      'avatarSeed' in parsed
     ) {
       return parsed as StoredSession;
     }

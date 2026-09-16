@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useGameConnection } from './hooks/useGameConnection.js';
 import IdentityScreen from './screens/IdentityScreen.js';
 import LobbyScreen from './screens/LobbyScreen.js';
@@ -7,30 +8,40 @@ import QuestionScreen from './screens/QuestionScreen.js';
 import RevealScreen from './screens/RevealScreen.js';
 import PodiumScreen from './screens/PodiumScreen.js';
 import { loadSession } from './lib/session.js';
-
-const WS_HOST = import.meta.env.VITE_WS_HOST as string;
+import { WS_HOST } from './lib/wsHost.js';
 
 export default function App() {
   const { state, rejection, join, send } = useGameConnection();
+  const [joinError, setJoinError] = useState<string | null>(null);
 
   async function handleJoin(params: { code: string; name: string; avatarSeed: string }) {
-    if (params.code === '') {
-      // Mirrors RealtimeClient's ws/wss derivation (realtimeClient.ts) so the
-      // lobby-creation fetch works against a plain-HTTP local `wrangler dev`
-      // server as well as the deployed https host.
-      const protocol = WS_HOST?.startsWith('localhost') ? 'http' : 'https';
-      const response = await fetch(`${protocol}://${WS_HOST}/api/lobby`, { method: 'POST' });
-      const body = (await response.json()) as { code: string };
-      join({ ...params, code: body.code });
-      return;
+    setJoinError(null);
+    try {
+      if (params.code === '') {
+        // Mirrors RealtimeClient's ws/wss derivation (realtimeClient.ts) so the
+        // lobby-creation fetch works against a plain-HTTP local `wrangler dev`
+        // server as well as the deployed https host.
+        const protocol = WS_HOST.startsWith('localhost') ? 'http' : 'https';
+        const response = await fetch(`${protocol}://${WS_HOST}/api/lobby`, { method: 'POST' });
+        if (!response.ok) {
+          setJoinError('Could not create a lobby right now. Please try again.');
+          return;
+        }
+        const body = (await response.json()) as { code: string };
+        join({ ...params, code: body.code });
+        return;
+      }
+      join(params);
+    } catch {
+      setJoinError('Could not reach the server. Check your connection and try again.');
     }
-    join(params);
   }
 
   if (state === null) {
     return (
       <div>
         {rejection !== null && <p role="alert">{rejection}</p>}
+        {joinError !== null && <p role="alert">{joinError}</p>}
         <IdentityScreen onJoin={handleJoin} />
       </div>
     );

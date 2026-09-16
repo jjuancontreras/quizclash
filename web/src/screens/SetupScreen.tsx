@@ -56,6 +56,12 @@ export default function SetupScreen({ state, selfId, onSubmit }: SetupScreenProp
 
   return (
     <Card className="mx-auto flex max-w-md flex-col gap-5 p-6">
+      {state.error !== null && (
+        <p role="alert" className="text-sm font-bold text-red-600">
+          {state.error}
+        </p>
+      )}
+
       <div role="tablist" className="flex gap-2">
         <button
           role="tab"

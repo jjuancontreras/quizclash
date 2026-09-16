@@ -9,6 +9,7 @@ class FakeWebSocket {
   onerror: (() => void) | null = null;
   sent: string[] = [];
   url: string;
+  closeCalls = 0;
 
   constructor(url: string) {
     this.url = url;
@@ -20,6 +21,7 @@ class FakeWebSocket {
   }
 
   close(): void {
+    this.closeCalls += 1;
     this.onclose?.();
   }
 
@@ -97,6 +99,37 @@ describe('RealtimeClient', () => {
 
     const socket = FakeWebSocket.instances[0]!;
     expect(socket.sent).toContainEqual(JSON.stringify({ type: 'SUBMIT_ANSWER', choiceIndex: 2 }));
+  });
+
+  // Finding 5 (Plan B review): a second connect() used to leave the first
+  // socket open, so both fed the same client with no way to tell which
+  // STATE frame would win.
+  test('connect closes any existing socket before opening a new one', () => {
+    const client = new RealtimeClient();
+    client.connect({ host: 'localhost:8787', code: 'ABCD', playerId: 'p1', token: '', name: 'Juan', avatarSeed: 'seed-1' });
+    const firstSocket = FakeWebSocket.instances[0]!;
+    let firstSocketClosed = false;
+    firstSocket.onclose = () => {
+      firstSocketClosed = true;
+    };
+
+    client.connect({ host: 'localhost:8787', code: 'WXYZ', playerId: 'p2', token: '', name: 'Ana', avatarSeed: 'seed-2' });
+
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(firstSocket.closeCalls).toBe(1);
+    expect(firstSocket.onclose).toBeNull();
+    expect(firstSocketClosed).toBe(false);
+  });
+
+  test('connect does not emit a spurious disconnected event when replacing an existing socket', () => {
+    const client = new RealtimeClient();
+    const events: string[] = [];
+    client.on((e) => events.push(e.type));
+
+    client.connect({ host: 'localhost:8787', code: 'ABCD', playerId: 'p1', token: '', name: 'Juan', avatarSeed: 'seed-1' });
+    client.connect({ host: 'localhost:8787', code: 'WXYZ', playerId: 'p2', token: '', name: 'Ana', avatarSeed: 'seed-2' });
+
+    expect(events).not.toContain('disconnected');
   });
 
   test('on returns an unsubscribe function', () => {
