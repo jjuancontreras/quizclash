@@ -36,6 +36,16 @@ export const MAX_UPLOAD_BYTES = 10_485_760;
 /** Generation is aborted past this. Spec §8. */
 export const GENERATION_TIMEOUT_MS = 90_000;
 
+/**
+ * Per-attempt network timeout for a single Gemini call. Generation retries
+ * once (src/quiz/generator.ts), so this must leave room for two attempts
+ * inside GENERATION_TIMEOUT_MS -- without it, one genuinely slow call (a
+ * real "high demand" 503 has been observed taking well over two minutes to
+ * even return an error) can burn the entire budget by itself, leaving no
+ * time for the retry that would otherwise have succeeded.
+ */
+export const GEMINI_REQUEST_TIMEOUT_MS = 35_000;
+
 /** An empty lobby self-destructs after this. Spec §6. */
 export const IDLE_CLEANUP_MS = 600_000;
 

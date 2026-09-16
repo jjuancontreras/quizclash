@@ -1,9 +1,39 @@
-import { describe, expect, test } from 'vitest';
-import { buildContents, DEFAULT_GEMINI_MODEL, type QuizSource } from './geminiClient.js';
+import { describe, expect, test, vi } from 'vitest';
+import { buildContents, createGeminiModel, DEFAULT_GEMINI_MODEL, type QuizSource } from './geminiClient.js';
+import { GEMINI_REQUEST_TIMEOUT_MS } from '../shared/constants.js';
+
+const generateContentMock = vi.fn().mockResolvedValue({ text: '{"questions":[]}' });
+
+vi.mock('@google/genai', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@google/genai')>();
+  return {
+    ...actual,
+    GoogleGenAI: vi.fn().mockImplementation(function GoogleGenAI(this: { models: unknown }) {
+      this.models = { generateContent: generateContentMock };
+    }),
+  };
+});
 
 describe('DEFAULT_GEMINI_MODEL', () => {
   test('names a Flash model, which is what the free tier serves', () => {
     expect(DEFAULT_GEMINI_MODEL).toContain('flash');
+  });
+});
+
+describe('createGeminiModel', () => {
+  test('sets a per-request network timeout, so one slow call cannot burn the whole generation budget by itself', async () => {
+    generateContentMock.mockClear();
+    const model = createGeminiModel('fake-key');
+
+    await model.generate({ kind: 'text', text: 'Material.' }, { count: 5, difficulty: 'medium', focus: '', sourceKind: 'text' });
+
+    expect(generateContentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          httpOptions: { timeout: GEMINI_REQUEST_TIMEOUT_MS },
+        }),
+      }),
+    );
   });
 });
 

@@ -1,5 +1,5 @@
-import { describe, expect, test, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, test, vi } from 'vitest';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SetupScreen from './SetupScreen.js';
 import type { PublicState } from '../../../src/shared/types.js';
@@ -24,6 +24,10 @@ function makeState(overrides: Partial<PublicState> = {}): PublicState {
 }
 
 describe('SetupScreen', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   test('non-host players see a waiting message, not the form', () => {
     render(<SetupScreen state={makeState({ hostId: 'p1' })} selfId="p2" onSubmit={() => {}} />);
     expect(screen.getByText(/host is building/i)).toBeInTheDocument();
@@ -98,6 +102,14 @@ describe('SetupScreen', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  test('shows the upload size limit upfront, before any file is selected', async () => {
+    render(<SetupScreen state={makeState({ hostId: 'p1' })} selfId="p1" onSubmit={() => {}} />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('tab', { name: /upload pdf/i }));
+    expect(screen.getByText(/max 10mb/i)).toBeInTheDocument();
+  });
+
   test('switching tabs hides the other tab\'s input, in both directions', async () => {
     render(<SetupScreen state={makeState({ hostId: 'p1' })} selfId="p1" onSubmit={() => {}} />);
     const user = userEvent.setup();
@@ -151,6 +163,49 @@ describe('SetupScreen', () => {
     render(<SetupScreen state={makeState({ phase: 'GENERATING', hostId: 'p1' })} selfId="p2" onSubmit={() => {}} />);
     expect(screen.getByText(/building your quiz/i)).toBeInTheDocument();
     expect(screen.queryByText(/host is building/i)).not.toBeInTheDocument();
+  });
+
+  test('shows a progress bar during GENERATING for the host', () => {
+    const { container } = render(
+      <SetupScreen
+        state={makeState({ phase: 'GENERATING', hostId: 'p1', phaseEndsAtMs: Date.now() + 90_000 })}
+        selfId="p1"
+        onSubmit={() => {}}
+      />,
+    );
+    expect(container.querySelector('[data-slot="progress"]')).toBeInTheDocument();
+  });
+
+  test('shows the same progress bar during GENERATING for non-host players', () => {
+    const { container } = render(
+      <SetupScreen
+        state={makeState({ phase: 'GENERATING', hostId: 'p1', phaseEndsAtMs: Date.now() + 90_000 })}
+        selfId="p2"
+        onSubmit={() => {}}
+      />,
+    );
+    expect(container.querySelector('[data-slot="progress"]')).toBeInTheDocument();
+  });
+
+  test('the GENERATING progress bar advances over time rather than staying frozen', () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    vi.setSystemTime(now);
+    const { container } = render(
+      <SetupScreen
+        state={makeState({ phase: 'GENERATING', hostId: 'p1', phaseEndsAtMs: now + 90_000 })}
+        selfId="p1"
+        onSubmit={() => {}}
+      />,
+    );
+    const indicator = container.querySelector('[data-slot="progress-indicator"]') as HTMLElement;
+    const initialTransform = indicator.style.transform;
+
+    act(() => {
+      vi.advanceTimersByTime(20_000);
+    });
+
+    expect(indicator.style.transform).not.toBe(initialTransform);
   });
 
   // Finding 3 (Plan B review): a generation failure populates state.error,

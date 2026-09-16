@@ -305,7 +305,8 @@ function handlePlayAgain(state: GameState, playerId: string): EngineResult {
   return result(next);
 }
 
-const GENERATION_TIMEOUT_MESSAGE = 'Question generation took too long. Try a smaller file.';
+const GENERATION_TIMEOUT_MESSAGE =
+  "Question generation is taking longer than usual — that's almost always the AI service being busy, not your file. Try again in a minute.";
 
 function handleOpenSetup(state: GameState, playerId: string): EngineResult {
   if (playerId !== state.hostId) return rejected(state, playerId, 'NOT_HOST');

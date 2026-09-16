@@ -1,6 +1,7 @@
 import { GoogleGenAI, type Content } from '@google/genai';
 import { QUIZ_RESPONSE_SCHEMA } from './schema.js';
 import { buildQuizPrompt } from './prompt.js';
+import { GEMINI_REQUEST_TIMEOUT_MS } from '../shared/constants.js';
 import type { SetupConfig } from '../shared/types.js';
 
 export type QuizSource =
@@ -54,6 +55,10 @@ export function createGeminiModel(
           responseMimeType: 'application/json',
           responseSchema: QUIZ_RESPONSE_SCHEMA,
           temperature: QUIZ_GENERATION_TEMPERATURE,
+          // Without this, one slow call can silently burn the entire
+          // GENERATION_TIMEOUT_MS budget by itself, leaving no time for
+          // generateQuiz's retry to ever run.
+          httpOptions: { timeout: GEMINI_REQUEST_TIMEOUT_MS },
         },
       });
 
