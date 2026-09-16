@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { createInitialState, reduce, toPublicState } from './gameEngine.js';
-import { QUESTION_WINDOW_MS, REVEAL_MS } from '../shared/constants.js';
+import { HURRY_WINDOW_MS, QUESTION_WINDOW_MS, REVEAL_MS } from '../shared/constants.js';
 import type { ChoiceIndex, GameState, Question, SetupConfig } from '../shared/types.js';
 
 const config: SetupConfig = { count: 5, difficulty: 'easy', focus: '', sourceKind: 'text' };
@@ -158,6 +158,42 @@ describe('SUBMIT_ANSWER', () => {
     expect(late.state.answers).toEqual(state.answers);
     expect(late.state.players.find((p) => p.id === 'p2')?.score).toBe(0);
     expect(late.state.phase).toBe('REVEAL');
+  });
+
+  describe('the hurry window (competitive pressure after the first answer)', () => {
+    test('shortens everyone else\'s remaining time to HURRY_WINDOW_MS once the first player answers', () => {
+      // atFirstQuestion lands at t=1000, so the full-window deadline is 21000.
+      let state = atFirstQuestion(['p1', 'p2', 'p3']);
+      const result = answer(state, 'p1', 0, 1000);
+
+      expect(result.state.phaseEndsAtMs).toBe(1000 + HURRY_WINDOW_MS);
+      expect(result.alarmAtMs).toBe(1000 + HURRY_WINDOW_MS);
+    });
+
+    test('never extends the deadline: answering with less than the hurry window already remaining changes nothing', () => {
+      let state = atFirstQuestion(['p1', 'p2']);
+      // Full window ends at 21000; answering at 20800 leaves only 200ms, far
+      // under HURRY_WINDOW_MS -- the deadline must not jump forward to
+      // 20800 + HURRY_WINDOW_MS, which would be LATER than the original.
+      const result = answer(state, 'p1', 1, 20_800);
+
+      expect(result.state.phaseEndsAtMs).toBe(21_000);
+    });
+
+    test('does not re-shorten on a second answer -- only the first answer sets the hurry deadline', () => {
+      let state = atFirstQuestion(['p1', 'p2', 'p3']);
+      state = answer(state, 'p1', 0, 1000).state;
+      const afterFirst = state.phaseEndsAtMs;
+
+      const result = answer(state, 'p2', 0, 1500);
+
+      expect(result.state.phaseEndsAtMs).toBe(afterFirst);
+    });
+
+    test('a solo player answering reveals immediately -- the hurry window never has anyone left to pressure', () => {
+      const result = answer(atFirstQuestion(['p1']), 'p1', 0, 1000);
+      expect(result.state.phase).toBe('REVEAL');
+    });
   });
 });
 

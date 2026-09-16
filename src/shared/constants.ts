@@ -1,6 +1,14 @@
 /** Milliseconds a player has to answer a single question. Spec §6. */
 export const QUESTION_WINDOW_MS = 20_000;
 
+/**
+ * Once the first player answers a question, everyone still deciding has
+ * their remaining time capped to this -- competitive pressure, not just a
+ * courtesy. Never lengthens the deadline: a player who answers with less
+ * than this already remaining does not get anyone extra time either.
+ */
+export const HURRY_WINDOW_MS = 7_000;
+
 /** Milliseconds the REVEAL screen is held before the next question. */
 export const REVEAL_MS = 5_000;
 

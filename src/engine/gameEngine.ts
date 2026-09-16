@@ -2,6 +2,7 @@ import {
   COUNTDOWN_MS,
   DEFAULT_AVATAR_SEED,
   GENERATION_TIMEOUT_MS,
+  HURRY_WINDOW_MS,
   IDLE_CLEANUP_MS,
   MAX_AVATAR_SEED_CHARS,
   MAX_NAME_CHARS,
@@ -449,12 +450,23 @@ function handleSubmitAnswer(
     points,
   };
 
+  // The FIRST answer only: everyone still deciding gets put under pressure,
+  // capped to HURRY_WINDOW_MS from right now. Math.min means this can only
+  // shorten the deadline, never extend it -- a player who answers with less
+  // than the hurry window already remaining does not hand anyone extra time.
+  const isFirstAnswer = state.answers.length === 0;
+  const phaseEndsAtMs =
+    isFirstAnswer && state.phaseEndsAtMs !== null
+      ? Math.min(state.phaseEndsAtMs, nowMs + HURRY_WINDOW_MS)
+      : state.phaseEndsAtMs;
+
   const next: GameState = {
     ...state,
     answers: [...state.answers, answer],
     players: state.players.map((p) =>
       p.id === event.playerId ? { ...p, score: p.score + points } : p,
     ),
+    phaseEndsAtMs,
   };
 
   // Per player, not a count: a disconnected player's answer stays in

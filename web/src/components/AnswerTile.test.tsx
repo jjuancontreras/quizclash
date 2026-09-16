@@ -9,6 +9,11 @@ describe('AnswerTile', () => {
     expect(screen.getByText('Mitochondria')).toBeInTheDocument();
   });
 
+  test('labels each choice with a conventional A/B/C/D letter, not a shape', () => {
+    render(<AnswerTile choiceIndex={2} text="Ribosome" isCorrect={null} isSelected={false} onSelect={() => {}} />);
+    expect(screen.getByText('C')).toBeInTheDocument();
+  });
+
   test('calls onSelect with its own choiceIndex when clicked', async () => {
     const onSelect = vi.fn();
     render(<AnswerTile choiceIndex={2} text="Nucleus" isCorrect={null} isSelected={false} onSelect={onSelect} />);

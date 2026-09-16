@@ -1,4 +1,3 @@
-import { ANSWER_STYLES } from '../lib/colors.js';
 import type { ChoiceIndex } from '../../../src/shared/types.js';
 
 export interface AnswerTileProps {
@@ -12,15 +11,13 @@ export interface AnswerTileProps {
   readonly disabled?: boolean;
 }
 
-const SHAPE_GLYPH: Record<string, string> = {
-  circle: '●',
-  triangle: '▲',
-  square: '■',
-  diamond: '◆',
-};
+/** A/B/C/D, not a shape+color pair — a conventional multiple-choice label
+ * that's colorblind-safe on its own, so no separate accessibility signal
+ * is needed the way the old shape-per-tile design required one. */
+const CHOICE_LETTERS = ['A', 'B', 'C', 'D'] as const;
 
 export default function AnswerTile({ choiceIndex, text, isCorrect, isSelected, onSelect, disabled = false }: AnswerTileProps) {
-  const style = ANSWER_STYLES[choiceIndex]!;
+  const letter = CHOICE_LETTERS[choiceIndex];
   const isWrongSelection = isSelected && isCorrect === false;
 
   return (
@@ -30,11 +27,21 @@ export default function AnswerTile({ choiceIndex, text, isCorrect, isSelected, o
       onClick={() => onSelect(choiceIndex)}
       data-correct={isCorrect === true ? 'true' : undefined}
       data-wrong-selection={isWrongSelection ? 'true' : undefined}
-      className={`flex min-h-[140px] flex-col items-center justify-center gap-2 rounded-base border-2 border-border p-4 font-bold text-black disabled:opacity-70 ${style.hue} ${
-        isCorrect === true ? 'ring-4 ring-green-600' : ''
-      } ${isWrongSelection ? 'ring-4 ring-red-600' : ''}`}
+      className={`flex w-full cursor-pointer items-center gap-3 rounded-base border-2 border-border bg-secondary-background p-3 text-left font-bold text-foreground transition-colors disabled:cursor-not-allowed disabled:opacity-70 ${
+        isCorrect === true
+          ? 'border-green-600 bg-green-100'
+          : isWrongSelection
+            ? 'border-red-600 bg-red-100'
+            : 'hover:bg-main/20'
+      }`}
     >
-      <span className="text-2xl">{SHAPE_GLYPH[style.shape]}</span>
+      <span
+        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-base border-2 border-border font-heading ${
+          isCorrect === true ? 'bg-green-400' : isWrongSelection ? 'bg-red-400' : 'bg-main'
+        }`}
+      >
+        {letter}
+      </span>
       <span>{text}</span>
     </button>
   );

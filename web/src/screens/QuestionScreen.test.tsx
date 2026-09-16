@@ -86,4 +86,40 @@ describe('QuestionScreen', () => {
       expect(button).not.toBeDisabled();
     }
   });
+
+  test('shows which question this is out of the total the host configured', () => {
+    render(
+      <QuestionScreen
+        state={makeState({ questionIndex: 2, totalQuestions: 5 })}
+        players={players}
+        selfId="p1"
+        onAnswer={() => {}}
+      />,
+    );
+    expect(screen.getByText(/question 3 of 5/i)).toBeInTheDocument();
+  });
+
+  test('marks each player who has answered in the per-player roster, and leaves the rest unmarked', () => {
+    render(<QuestionScreen state={makeState({ answered: ['p1'] })} players={players} selfId="p1" onAnswer={() => {}} />);
+    const statuses = screen.getAllByTestId('player-answered-status');
+
+    expect(statuses).toHaveLength(2);
+    expect(statuses.find((el) => el.title.startsWith('Juan'))).toHaveAttribute('data-answered', 'true');
+    expect(statuses.find((el) => el.title.startsWith('Maria'))).toHaveAttribute('data-answered', 'false');
+  });
+
+  test('shows a hurry-up prompt once someone else has answered and I have not', () => {
+    render(<QuestionScreen state={makeState({ answered: ['p2'] })} players={players} selfId="p1" onAnswer={() => {}} />);
+    expect(screen.getByText(/hurry up/i)).toBeInTheDocument();
+  });
+
+  test('does not show the hurry-up prompt once I have answered myself', () => {
+    render(<QuestionScreen state={makeState({ answered: ['p1'] })} players={players} selfId="p1" onAnswer={() => {}} />);
+    expect(screen.queryByText(/hurry up/i)).not.toBeInTheDocument();
+  });
+
+  test('does not show the hurry-up prompt while nobody has answered yet', () => {
+    render(<QuestionScreen state={makeState({ answered: [] })} players={players} selfId="p1" onAnswer={() => {}} />);
+    expect(screen.queryByText(/hurry up/i)).not.toBeInTheDocument();
+  });
 });

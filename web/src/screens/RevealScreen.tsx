@@ -14,7 +14,7 @@ export default function RevealScreen({ state, selfId }: RevealScreenProps) {
 
   return (
     <div className="flex h-full flex-col gap-4 p-4">
-      <div className="grid grid-cols-2 gap-3">
+      <div className="flex flex-col gap-3">
         {state.prompt.choices.map((choice, i) => (
           <AnswerTile
             key={i}
