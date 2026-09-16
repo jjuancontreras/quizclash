@@ -390,4 +390,50 @@ describe('GameRoom', () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(leakedToHost.some((f) => f.type === 'REJECTED')).toBe(false);
   });
+
+  /**
+   * `acceptWebSocket` (used to accept every connection in this file) puts
+   * this object under Cloudflare's WebSocket Hibernation API: the runtime
+   * may evict it from memory between events at any time, and a plain
+   * in-memory class field does not survive that. This is the regression
+   * guard for that exact defect — engine state must reach `ctx.storage` on
+   * every mutation, not just live in `this.state`, or a real eviction (which
+   * this test harness's own DO simulator does not reproduce; a real deploy
+   * playtest is what actually surfaced this) silently resets every lobby to
+   * empty the next time anyone in it does anything.
+   */
+  test('persists engine state to storage on every mutation, not only in memory', async () => {
+    const stub = room('PRST');
+    await stub.fetch('https://do/ws?code=PRST&name=p1&seed=s&playerId=p1', {
+      headers: { Upgrade: 'websocket' },
+    });
+
+    await runInDurableObject(stub, async (instance: GameRoom, state: DurableObjectState) => {
+      const stored = await state.storage.get<GameState>('state');
+      expect(stored).toBeDefined();
+      expect(stored?.players.map((p) => p.id)).toEqual(['p1']);
+      expect(stored?.hostId).toBe('p1');
+      // Same object the engine is actually using, not a coincidentally
+      // similar snapshot from some other write path -- debugState() redacts
+      // reconnectToken, so compare everything else field-for-field and the
+      // token separately (it must be present and real, just not equal to
+      // debugState()'s deliberately-blanked copy).
+      const debugged = instance.debugState();
+      expect({ ...stored, players: [] }).toEqual({ ...debugged, players: [] });
+      expect(stored?.players[0]?.reconnectToken).not.toBe('');
+      expect(stored?.players.map((p) => ({ ...p, reconnectToken: '' }))).toEqual(debugged.players);
+    });
+
+    await stub.fetch('https://do/ws?code=PRST&name=p2&seed=s&playerId=p2', {
+      headers: { Upgrade: 'websocket' },
+    });
+
+    await runInDurableObject(stub, async (_instance: GameRoom, state: DurableObjectState) => {
+      const stored = await state.storage.get<GameState>('state');
+      // The second join is a second, separate mutation — storage must
+      // reflect it too, not just whatever happened to be written first.
+      expect(stored?.players.map((p) => p.id)).toEqual(['p1', 'p2']);
+    });
+  });
+
 });

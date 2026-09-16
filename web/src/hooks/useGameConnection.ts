@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { generateId } from '../lib/generateId.js';
 import { RealtimeClient, type ClientEvent, type ClientMessage } from '../lib/realtimeClient.js';
 import { loadSession, saveSession } from '../lib/session.js';
 import { WS_HOST } from '../lib/wsHost.js';
@@ -118,7 +119,7 @@ export function useGameConnection(): UseGameConnection {
     clientRef.current?.connect({
       host: WS_HOST,
       code: params.code,
-      playerId: crypto.randomUUID(),
+      playerId: generateId(),
       token: '',
       name: params.name,
       avatarSeed: params.avatarSeed,

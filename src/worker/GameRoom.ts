@@ -30,9 +30,31 @@ function rejectionResponse(reason: 'LOBBY_FULL' | 'NOT_HOST' | 'BAD_PHASE' | 'BA
   return null;
 }
 
+const STATE_STORAGE_KEY = 'state';
+
 export class GameRoom extends DurableObject<Env> {
   private state: GameState = createInitialState('');
   private pendingSource: QuizSource | null = null;
+
+  /**
+   * `acceptWebSocket` puts this object under Cloudflare's WebSocket
+   * Hibernation API: the runtime is free to evict it from memory between
+   * events (routine, cost-saving behavior, not a rare edge case) while
+   * keeping player connections looking alive at the edge. A plain class
+   * field does not survive that — without this rehydration, every wake
+   * silently resets to an empty lobby, and everyone already "in" the room
+   * vanishes from the server's tracking despite their own socket appearing
+   * fine to them. `blockConcurrencyWhile` guarantees no request reaches this
+   * instance until the read completes, so nothing racing the constructor can
+   * observe the momentary default state.
+   */
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    this.ctx.blockConcurrencyWhile(async () => {
+      const storedState = await this.ctx.storage.get<GameState>(STATE_STORAGE_KEY);
+      if (storedState !== undefined) this.state = storedState;
+    });
+  }
 
   /**
    * Read-only test seam. Not called in production paths, and deliberately not
@@ -80,7 +102,7 @@ export class GameRoom extends DurableObject<Env> {
     // Checked, and turned into a response, before the socket is ever
     // created — a failed reconnect attempt must not seat an attacker's
     // connection at all.
-    const outcome = this.apply(event);
+    const outcome = await this.apply(event);
     const rejection = outcome.replies.find((r) => r.message.type === 'REJECTED');
     const reason = rejection?.message.type === 'REJECTED' ? rejection.message.reason : undefined;
     const rejectedResponse = rejectionResponse(reason);
@@ -120,10 +142,16 @@ export class GameRoom extends DurableObject<Env> {
     const parsed = parseClientMessage(raw, meta.playerId);
     if (parsed === null) return;
 
-    // The source is held aside; the reducer stays pure and never sees a payload.
+    // The source is held aside; the reducer stays pure and never sees a
+    // payload. Not persisted to storage: webSocketMessage awaits straight
+    // through apply() and runEffect() as one chain, so there is no gap
+    // between setting this and the GENERATE effect consuming it where a
+    // hibernation wake could land — and a request that dies mid-flight
+    // for some other reason is already recoverable by the client simply
+    // resubmitting, same as any other failed SUBMIT_SETUP.
     if (parsed.source !== null) this.pendingSource = parsed.source;
 
-    const outcome = this.apply(parsed.event);
+    const outcome = await this.apply(parsed.event);
     await this.runEffect(outcome.effect);
   }
 
@@ -146,12 +174,12 @@ export class GameRoom extends DurableObject<Env> {
   private async releaseSocket(ws: WebSocket): Promise<void> {
     const meta = ws.deserializeAttachment() as SocketMeta | null;
     if (meta === null) return;
-    const outcome = this.apply({ type: 'PLAYER_LEAVE', playerId: meta.playerId });
+    const outcome = await this.apply({ type: 'PLAYER_LEAVE', playerId: meta.playerId });
     await this.runEffect(outcome.effect);
   }
 
   async alarm(): Promise<void> {
-    const outcome = this.apply({ type: 'TIMEOUT' });
+    const outcome = await this.apply({ type: 'TIMEOUT' });
     await this.runEffect(outcome.effect);
   }
 
@@ -160,9 +188,10 @@ export class GameRoom extends DurableObject<Env> {
     return Date.now();
   }
 
-  private apply(event: EngineEvent): EngineResult {
+  private async apply(event: EngineEvent): Promise<EngineResult> {
     const outcome = reduce(this.state, event, this.now());
     this.state = outcome.state;
+    await this.ctx.storage.put(STATE_STORAGE_KEY, this.state);
     this.broadcast(outcome.broadcasts);
     this.deliverReplies(outcome.replies);
     if (outcome.alarmAtMs !== null) {
@@ -227,8 +256,12 @@ export class GameRoom extends DurableObject<Env> {
     const source = this.pendingSource;
     const { generationId } = effect;
 
+    // Consumed either way, once: a stale upload must not be replayed against
+    // a later retry's own SUBMIT_SETUP.
+    this.pendingSource = null;
+
     if (source === null) {
-      this.apply({
+      await this.apply({
         type: 'GENERATION_FAILED',
         generationId,
         reason: 'No study material was received.',
@@ -239,7 +272,7 @@ export class GameRoom extends DurableObject<Env> {
     const model = createGeminiModel(this.env.GEMINI_API_KEY);
     const outcome = await generateQuiz(model, source, effect.config);
 
-    this.apply(
+    await this.apply(
       outcome.ok
         ? { type: 'GENERATION_SUCCEEDED', generationId, questions: outcome.questions }
         : { type: 'GENERATION_FAILED', generationId, reason: outcome.reason },
