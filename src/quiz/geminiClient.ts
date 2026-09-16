@@ -17,8 +17,16 @@ export interface QuizModel {
  * Model id is a single constant on purpose: Gemini Flash ids move fast, and
  * this is the one line to change. Verify it resolves before first deploy —
  * see the plan's Task 7 Step 6.
+ *
+ * `gemini-flash-latest` (the full model) was confirmed live, twice, to be
+ * returning 503 "high demand" errors taking 60-170s to even fail — well
+ * past this app's entire GENERATION_TIMEOUT_MS budget. `gemini-flash-lite-latest`
+ * was verified against a real uploaded PDF in the same session: correct,
+ * well-sourced quiz questions in ~6.5s. If the full model's availability
+ * recovers and lite's quality ever proves insufficient for real material,
+ * this is the one line to revert.
  */
-export const DEFAULT_GEMINI_MODEL = 'gemini-flash-latest';
+export const DEFAULT_GEMINI_MODEL = 'gemini-flash-lite-latest';
 
 /**
  * Generation temperature. Higher values vary question phrasing; lower values
