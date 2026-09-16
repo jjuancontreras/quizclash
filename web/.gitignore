@@ -1,5 +1,9 @@
-# The root .gitignore's `.env*` pattern would also catch this dev-only,
-# non-secret default (VITE_WS_HOST=localhost:8787) — re-include it so it's
-# tracked. `.env.production` stays ignored by the root pattern: the
+# The root .gitignore's `.env*` pattern would also catch these dev-only,
+# non-secret defaults (VITE_WS_HOST=localhost:8787) — re-include them so
+# they're tracked. `.env.production` stays ignored by the root pattern: the
 # deployed Worker's real host is set at Vercel deploy time, not hardcoded.
+# `.env.test` must be tracked, not just local convenience: Vitest defaults
+# to mode 'test', so `web/src/lib/wsHost.ts`'s load-time throw-if-unset
+# guard fails every test file that imports it on any checkout without one.
 !.env.development
+!.env.test
