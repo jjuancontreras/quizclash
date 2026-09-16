@@ -10,5 +10,9 @@
   "durable_objects": {
     "bindings": [{ "name": "GAME_ROOM", "class_name": "GameRoom" }]
   },
-  "migrations": [{ "tag": "v1", "new_classes": ["GameRoom"] }]
+  // Cloudflare's free plan requires SQLite-backed Durable Objects
+  // (new_sqlite_classes), not the legacy KV-backed new_classes migration.
+  // GameRoom only uses ctx.storage.setAlarm/deleteAlarm (no KV get/put),
+  // so this is a safe, behavior-preserving change.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GameRoom"] }]
 }

@@ -6,7 +6,12 @@ export { GameRoom } from './GameRoom.js';
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json' },
+    // The client fetches this from a different origin (the Vite dev
+    // server locally, the Vercel domain once deployed) than this Worker's
+    // own host, so the browser enforces CORS on this response. The
+    // endpoint is public and unauthenticated — it only mints a random
+    // lobby code — so allowing any origin carries no real risk.
+    headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' },
   });
 }
 
