@@ -3,6 +3,7 @@ import { createInitialState, reduce, toPublicState } from '../engine/gameEngine.
 import { createGeminiModel } from '../quiz/geminiClient.js';
 import { generateQuiz } from '../quiz/generator.js';
 import { parseClientMessage } from './messages.js';
+import { GENERATION_RETRY_DELAY_MS } from '../shared/constants.js';
 import type { EngineEffect, EngineEvent, EngineResult, GameState, ServerMessage } from '../shared/types.js';
 import type { QuizSource } from '../quiz/geminiClient.js';
 import type { Env } from './env.js';
@@ -270,7 +271,7 @@ export class GameRoom extends DurableObject<Env> {
     }
 
     const model = createGeminiModel(this.env.GEMINI_API_KEY);
-    const outcome = await generateQuiz(model, source, effect.config);
+    const outcome = await generateQuiz(model, source, effect.config, Math.random, GENERATION_RETRY_DELAY_MS);
 
     await this.apply(
       outcome.ok

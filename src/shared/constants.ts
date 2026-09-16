@@ -54,6 +54,14 @@ export const GENERATION_TIMEOUT_MS = 90_000;
  */
 export const GEMINI_REQUEST_TIMEOUT_MS = 35_000;
 
+/**
+ * Pause before generateQuiz's single retry. A rate-limit or 5xx failure is
+ * far more likely to clear given a moment than on an immediate back-to-back
+ * retry. 2 * GEMINI_REQUEST_TIMEOUT_MS + this still leaves headroom inside
+ * GENERATION_TIMEOUT_MS.
+ */
+export const GENERATION_RETRY_DELAY_MS = 2_000;
+
 /** An empty lobby self-destructs after this. Spec §6. */
 export const IDLE_CLEANUP_MS = 600_000;
 
