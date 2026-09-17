@@ -87,10 +87,10 @@ Modules 1–5 shipped as **Plan A**: a fully tested, headless engine and Durable
 | Phase | Players see | Exits when |
 |---|---|---|
 | `LOBBY` | Avatars bubbling in, lobby code, invite link | Host opens setup |
-| `SETUP` | Host: the wizard. Others: "Host is building the quiz…" with file name | Host submits |
-| `GENERATING` | Animated "building your quiz…" for everyone | Questions validated, or failure |
+| `SETUP` | Host: the wizard. Others: "Host is building the quiz…" | Host submits |
+| `GENERATING` | A real elapsed-time progress bar for everyone, not just a static message | Questions validated, or failure |
 | `COUNTDOWN` | 3 → 2 → 1, synced | 3s elapse |
-| `QUESTION` | Question, 4 choices, shrinking timer bar | All players answered **or** window expires |
+| `QUESTION` | "Question N of Total", question, 4 choices, shrinking timer bar, per-player answered roster | All players answered **or** window expires |
 | `REVEAL` | Correct answer, explanation, source quote, delta, running scoreboard | 5s elapse |
 | `PODIUM` | Final 1–4 ranking, confetti | Host chooses "Play again", or all leave |
 
@@ -189,7 +189,7 @@ Difficulty lives in the distractors, not the question stem.
 
 **Three layers of unequal strength.** The JSON schema *guarantees* shape — four choices, a valid index, no missing fields. The prompt *requests* length limits and the question count. Only server-side validation *enforces* either. Code must treat every length limit and every count as untrusted until checked.
 
-**Why 120 and 60:** on a 375px phone at readable size, 120 characters is roughly four lines of question text, and a 2×2 grid cell holds about 60 before it scrolls. The mobile-first requirement is therefore a **generation** constraint, not a CSS one.
+**Why 120 and 60:** on a 375px phone at readable size, 120 characters is roughly four lines of question text, and (originally, when choices lived in a 2×2 grid cell — see §9's V1 revision for why that layout changed) 60 characters was about what a cell held before it scrolled. The limit itself didn't need to change when the layout did — a full-width row comfortably fits 60 characters on one or two lines either way — but the constraint's origin was the grid, not the current list. The mobile-first requirement is a **generation** constraint either way, not a CSS one.
 
 **Overflowing questions are dropped, never truncated** — a question cut mid-clause is worse than no question. If at least 5 survive, the round plays short; below that it is a generation failure.
 
@@ -205,10 +205,10 @@ Difficulty lives in the distractors, not the question stem.
 
 ### Failure paths
 
-- Malformed or schema-invalid output → retry once, then back to `SETUP` with "Couldn't build a quiz from that file — try a different file or paste the text."
-- Fewer than 5 valid questions → generation failure.
+- Malformed or schema-invalid output, or fewer than 5 valid questions survive → retry once (after a short delay, added in V1 — see §14), then back to `SETUP`.
+- **V1 revision: the retry-exhausted message is no longer one-size-fits-all.** If every failed attempt looked transient (a rate-limit or 5xx status from the model call), the host sees "The AI service is busy right now. Please wait a moment and try again." — not a claim about their file. Only when at least one attempt failed for a genuine content/schema reason does the host see "Couldn't build a quiz from that file — try a different file or paste the text." Both are still generic enough to never leak a raw model error (unresolvable model id, expired key, exhausted quota all stay indistinguishable from outside — logged server-side only).
 - Upload over 10MB → rejected client-side before sending.
-- Generation exceeding 90s → aborted, same failure path.
+- Generation exceeding 90s → the engine's own alarm-based hard cutoff fires first, independent of `generateQuiz`'s two-attempt retry above; this is a separate message ("Question generation is taking longer than usual — that's almost always the AI service being busy, not your file. Try again in a minute.", reworded in V1 for the same reason as the busy-message split above) rather than either of the two `generateQuiz` outcomes.
 
 **Every failure returns the host to a screen where they can retry. No phase may strand the lobby.**
 
@@ -232,20 +232,26 @@ An uploaded PDF could contain text such as "ignore your instructions". The worst
 
 **Avatars:** [DiceBear](https://www.dicebear.com/) — deterministic avatars generated from a seed string. A grid of 12 pre-seeded options; only the seed is stored. No uploads, no image hosting, no moderation surface.
 
-### Answer colours must carry shapes
+### Answer choices — V1 revision: A/B/C/D list, not shape+colour tiles
 
-Roughly 1 in 12 men has some colour vision deficiency. Four answers distinguished by colour alone make that player's game materially harder, on a timer. Each answer gets a distinct hue **and** a distinct shape, so colour is redundant rather than load-bearing.
+**Superseded during V1 refinement, after real playtesting.** The original design below (a 2×2 grid of shape+colour tiles) shipped first, then was replaced: it read as a direct clone of Kahoot's own answer-tile pattern — exactly the outcome §9's own component-library rationale explicitly warned against ("Cloning Kahoot's look is both derivative and trademark-adjacent"). The fix that was live-tested and shipped is a vertical list of full-width rows, each labelled with a conventional **A/B/C/D** letter badge instead of a shape+hue pair.
 
-| Slot | Shape | Hue |
-|---|---|---|
-| 1 | Circle | Coral red |
-| 2 | Triangle | Ocean blue |
-| 3 | Square | Sun yellow |
-| 4 | Diamond | Grass green |
+This did not reopen the accessibility requirement — it satisfies it more simply. A letter is colour-independent on its own; no separate shape pairing is needed to keep colour from being load-bearing. Correct/wrong feedback at `REVEAL` still uses colour (green/red), but only as reinforcement alongside the letter and the explanation text, never as the only signal.
+
+The original shape+colour design, kept here for the record of what changed and why:
+
+> Roughly 1 in 12 men has some colour vision deficiency. Four answers distinguished by colour alone make that player's game materially harder, on a timer. Each answer got a distinct hue **and** a distinct shape, so colour was redundant rather than load-bearing.
+>
+> | Slot | Shape | Hue |
+> |---|---|---|
+> | 1 | Circle | Coral red |
+> | 2 | Triangle | Ocean blue |
+> | 3 | Square | Sun yellow |
+> | 4 | Diamond | Grass green |
 
 ### Mobile layout (portrait primary)
 
-- **Question screen:** question text in the top ~35%; **2×2 answer grid** in the bottom ~55%; each cell a large thumb target, around 140px tall — far above the 44px minimum.
+- **Question screen:** question text and a live "N of M players answered" roster (with per-player checkmarks) in the top ~35%; a **vertical list of four full-width answer rows** in the bottom ~55%, each a large thumb target.
 - **Timer is a shrinking horizontal bar, not a number.** A bar is read peripherally while reading the question; a counting number steals focus from the question.
 - **Lobby:** 2×2 avatar slots with visible empty "waiting for players" placeholders, so a 2-player lobby looks deliberate rather than broken.
 - Safe-area insets respected for notched phones.
@@ -288,4 +294,25 @@ Accounts and passwords; any database; quiz library or replay; DOCX, PPTX, or ima
 | Wrong answer key frozen at generation | Option A makes it visible; flag-and-void is the V2 fix. |
 | Question quality poor on dense or badly formatted PDFs | Failure path returns to SETUP; pasted text is the escape hatch. |
 | Gemini free-tier limits change | 1,500 RPD against a handful of games leaves enormous headroom. |
-| Server restart drops in-flight games | Accepted per decision #3. |
+| Server restart drops in-flight games | **Resolved in V1, not merely accepted.** A real hibernation-driven state loss was found and fixed after deploy (§14) — this risk should be considered closed, not just mitigated. |
+
+## 14. V1 Shipped (2026-09-17)
+
+V1 is live and considered feature-complete. Deployed to `https://quizclash.fernando-contreras.workers.dev`. Everything from here is refinement driven by real playtesting and outside feedback, not new architecture.
+
+**Real bugs found only by playing the live, deployed game — invisible to every unit, integration, and local-dev test in this spec's §10:**
+
+- **Durable Object state loss on hibernation.** `GameRoom`'s entire game state was a plain in-memory field with no persistence to `ctx.storage`. Cloudflare's WebSocket Hibernation API (`acceptWebSocket`) routinely evicts a Durable Object from memory between messages while keeping connections looking alive — every eviction silently reset the lobby to empty, and every seated player vanished from the server's own tracking without their own socket showing anything wrong. This directly falsifies the "Server restart drops in-flight games" risk above, which treated the failure mode as rare and acceptable; hibernation eviction is routine, not rare. Fixed: state is persisted to `ctx.storage` after every mutation and rehydrated via `blockConcurrencyWhile` in the constructor.
+- **`crypto.randomUUID()` is unavailable outside a secure context.** Testing from a second device over plain HTTP on a LAN IP (not `localhost`) throws `TypeError: crypto.randomUUID is not a function` — silently swallowed by a broad `try/catch` into a misleading "Could not reach the server" message. Fixed with a `getRandomValues`-based fallback, which has no such restriction.
+- **`/api/lobby` had no CORS header.** Worked via `curl`, silently blocked by every real browser. `curl` was never a substitute for a real cross-origin browser request.
+- **`gemini-flash-latest` became unreliable in practice.** Confirmed directly against the live API: single calls taking 60–170s to return a `503 UNAVAILABLE` ("high demand"), well past this spec's 90s generation budget for even one of the two allowed attempts. Switched the default model to `gemini-flash-lite-latest` (verified end-to-end against real uploaded material) and added a per-attempt network timeout plus a short delay before the retry, so a rate-limit-shaped failure has a real chance of clearing before the budget is exhausted.
+- **Generation's single failure message conflated "the AI service is busy" with "this file won't work."** Both collapsed into the same file-blaming text. Now split into two honest messages depending on whether every failed attempt looked transient (rate limit / 5xx) or not.
+
+**Real design change, not a bug: §9's answer-tile design was replaced** (see the "V1 revision" note in §9) after it read as a Kahoot clone in practice — resolved without weakening the accessibility requirement it existed to serve.
+
+**New mechanic, not in the original spec: competitive pressure.** Once any player answers a `QUESTION`, every player still deciding has their remaining time capped to a fixed hurry window (currently 7s), never extended — implemented as a `Math.min` against the existing deadline in the reducer, broadcast through the same `phaseEndsAtMs` field the client already renders, no wire-protocol change required. Paired with a client-side "hurry up" prompt and a live per-player answered roster (both driven by data — `state.answered` — the engine already exposed).
+
+**Known gaps carried forward, not yet closed, still real:**
+
+- Spec §6's original "with file name" claim for the non-host SETUP waiting screen was never implemented — the wire protocol has no field for it (`SetupMessageSchema` carries only `config` + `source`). Closing it needs a `sourceLabel`-shaped addition across the wire protocol, `GameState`, and `PublicState`. Judged cosmetic enough to defer through Plan B's final review and still true today.
+- `wrangler dev --local` cannot boot on the primary dev machine (a Node v24.18.0/workerd `spawn UNKNOWN` incompatibility) — local iteration currently requires either a live `wrangler deploy` or `wrangler dev --remote` (which itself no longer supports Durable Objects, so it only covers non-DO routes). Worth resolving before the next round of engine-level refinement work, since it currently makes "run it locally and watch it work" impossible for the one component most likely to need iteration.
